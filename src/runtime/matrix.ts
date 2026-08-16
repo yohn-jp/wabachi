@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   FACT_SCHEMA_VERSION,
@@ -254,6 +254,54 @@ export interface ProviderMatrixArtifactPaths {
   readonly unmatchedPath: string;
   readonly informationGainPath: string;
   readonly reportPath: string;
+}
+
+/**
+ * A `MatrixEntityReference` reduced to the identity fields needed to read a
+ * row without re-embedding the full entity (path/range/kind), which is
+ * already persisted once in normalized/facts.json and reachable through
+ * `factIds`/`evidenceIds`.
+ */
+export interface MatrixEntityRefProjection {
+  readonly provider: ProviderIdentity;
+  readonly nativeId: string;
+  readonly canonicalId?: string;
+  readonly candidateCanonicalIds: readonly string[];
+}
+
+export type MatrixFactObjectProjection =
+  | { readonly kind: "entity"; readonly entity: MatrixEntityRefProjection }
+  | { readonly kind: "value"; readonly value: string };
+
+/** `MatrixFactVariant` reduced to identity references; see `MatrixEntityRefProjection`. */
+export interface MatrixFactVariantProjection {
+  readonly key: string;
+  readonly factIds: readonly string[];
+  readonly evidenceIds: readonly string[];
+  readonly providers: readonly ProviderIdentity[];
+  readonly subject: MatrixEntityRefProjection;
+  readonly predicate: string;
+  readonly object: MatrixFactObjectProjection;
+}
+
+/**
+ * `MatrixFactRecord` projected for persistence: variants are reduced to
+ * identity references instead of full entity/object copies. Readers resolve
+ * `factIds`/`evidenceIds` against normalized/facts.json for full detail.
+ */
+export interface MatrixFactRecordProjection {
+  readonly key: string;
+  readonly logicalKey: string;
+  readonly repository: ResolvedRepository;
+  readonly factClass: string;
+  readonly predicate: string;
+  readonly state: MatrixFactState;
+  readonly comparisonPossible: boolean;
+  readonly correlationStatus: CorrelationStatus | "not-applicable";
+  readonly variants: readonly MatrixFactVariantProjection[];
+  readonly providerStates: readonly MatrixProviderFactStatus[];
+  readonly observedProviders: readonly ProviderIdentity[];
+  readonly missingProviders: readonly ProviderIdentity[];
 }
 
 export const MATRIX_METRIC_DEFINITIONS: readonly MatrixMetricDefinition[] = [
@@ -518,7 +566,7 @@ function buildComparableRow(
     variantsByKey.set(descriptor.exactKey, variant);
   }
   const variants = [...variantsByKey.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareCodeUnits(left, right))
     .map(([, group]) => buildFactVariant(group));
   const observedProviders = uniqueProviders(descriptors.map((descriptor) => descriptor.fact.provider));
   const state: MatrixFactState =
@@ -708,9 +756,11 @@ function buildProviderCoverage(
   const factCorrelation = countFactCorrelation(providerFacts);
   const rawObservedFactCount = providerFacts.length + providerUnsupported.length;
   const uniqueFactKeys = uniqueKeysForProvider(providerFacts, uniqueLogicalProviders);
+  const factsByClass = groupByFactClass(providerFacts);
+  const unsupportedByClass = groupByFactClass(providerUnsupported);
   const factClassCoverage = factClasses.map((factClass) => {
-    const classFacts = providerFacts.filter((descriptor) => descriptor.factClass === factClass);
-    const classUnsupported = providerUnsupported.filter((descriptor) => descriptor.factClass === factClass);
+    const classFacts = factsByClass.get(factClass) ?? [];
+    const classUnsupported = unsupportedByClass.get(factClass) ?? [];
     const classCorrelation = countFactCorrelation(classFacts);
     const classUniqueFactKeys = uniqueKeysForProvider(classFacts, uniqueLogicalProviders);
     return {
@@ -741,6 +791,16 @@ function buildProviderCoverage(
     factClasses: factClassCoverage,
     entityCorrelation,
   };
+}
+
+function groupByFactClass<T extends { readonly factClass: string }>(descriptors: readonly T[]): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const descriptor of descriptors) {
+    const group = groups.get(descriptor.factClass) ?? [];
+    group.push(descriptor);
+    groups.set(descriptor.factClass, group);
+  }
+  return groups;
 }
 
 function countFactCorrelation(facts: readonly FactDescriptor[]): MatrixFactCorrelationCounts {
@@ -825,7 +885,7 @@ function buildOverlap(
   const allProviders = factClasses.map((factClass) => buildAllProviderOverlap(providers, entries, factClass, index));
   return {
     pairwise: pairwise.sort(comparePairwiseOverlap),
-    allProviders: allProviders.sort((left, right) => left.factClass.localeCompare(right.factClass)),
+    allProviders: allProviders.sort((left, right) => compareCodeUnits(left.factClass, right.factClass)),
     facts: rows.filter((row) => row.state === "overlap"),
   };
 }
@@ -860,8 +920,9 @@ function indexComparableFactSets(
   return index;
 }
 
+/** Collision-free even when providerKeyValue or factClass contain the delimiter. */
 function indexKey(providerKeyValue: string, factClass: string): string {
-  return `${providerKeyValue}\u0000${factClass}`;
+  return JSON.stringify([providerKeyValue, factClass]);
 }
 
 function buildPairwiseOverlap(
@@ -912,9 +973,7 @@ function buildAllProviderOverlap(
   const union = new Set<string>();
   for (const keys of exactKeySets) for (const key of keys) union.add(key);
   const overlap =
-    entries.length === 0
-      ? []
-      : [...union].filter((key) => exactKeySets.every((keys) => keys.has(key))).sort();
+    entries.length === 0 ? [] : [...union].filter((key) => exactKeySets.every((keys) => keys.has(key))).sort();
   return {
     factClass,
     providers,
@@ -941,16 +1000,15 @@ function buildInformationGain(
     const exactKeysForProvider = [...new Set(providerFacts.map((descriptor) => descriptor.exactKey))].sort();
     const newComparableFactKeys = exactKeysForProvider.filter((key) => !baseline.has(key));
     const newComparableFactKeySet = new Set(newComparableFactKeys);
-    const factsByClass = new Map<string, FactDescriptor[]>();
+    const keysByClass = new Map<string, Set<string>>();
     for (const descriptor of providerFacts) {
-      const group = factsByClass.get(descriptor.factClass) ?? [];
-      group.push(descriptor);
-      factsByClass.set(descriptor.factClass, group);
+      const values = keysByClass.get(descriptor.factClass) ?? new Set<string>();
+      values.add(descriptor.exactKey);
+      keysByClass.set(descriptor.factClass, values);
     }
     const classCounts = factClasses
       .map((factClass) => {
-        const classFacts = factsByClass.get(factClass) ?? [];
-        const classKeys = new Set(classFacts.map((descriptor) => descriptor.exactKey));
+        const classKeys = keysByClass.get(factClass) ?? new Set<string>();
         const newKeys = [...classKeys].filter((key) => newComparableFactKeySet.has(key)).sort();
         return { factClass, newComparableFactCount: newKeys.length, newComparableFactKeys: newKeys };
       })
@@ -1029,7 +1087,7 @@ function collectRepositories(
   const values = [...facts.map((item) => item.fact.repository), ...unsupported.map((item) => item.evidence.repository)];
   const byKey = new Map<string, ResolvedRepository>();
   for (const repository of values) byKey.set(stableSerialize(repository), repository);
-  return [...byKey.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, value]) => value);
+  return [...byKey.entries()].sort(([left], [right]) => compareCodeUnits(left, right)).map(([, value]) => value);
 }
 
 function ratio(numerator: number, denominator: number): MatrixRatio {
@@ -1041,19 +1099,19 @@ function providerKey(provider: ProviderIdentity): string {
 }
 
 function compareProviderEntries(left: ProviderIdentityEntry, right: ProviderIdentityEntry): number {
-  return left.key.localeCompare(right.key);
+  return compareCodeUnits(left.key, right.key);
 }
 
 function compareProviders(left: ProviderIdentity, right: ProviderIdentity): number {
-  return providerKey(left).localeCompare(providerKey(right));
+  return compareCodeUnits(providerKey(left), providerKey(right));
 }
 
 function compareFactDescriptors(left: FactDescriptor, right: FactDescriptor): number {
-  const key = left.exactKey.localeCompare(right.exactKey);
+  const key = compareCodeUnits(left.exactKey, right.exactKey);
   if (key !== 0) return key;
-  const provider = left.providerKey.localeCompare(right.providerKey);
+  const provider = compareCodeUnits(left.providerKey, right.providerKey);
   if (provider !== 0) return provider;
-  return left.fact.factId.localeCompare(right.fact.factId);
+  return compareCodeUnits(left.fact.factId, right.fact.factId);
 }
 
 function sortFactDescriptors(values: readonly FactDescriptor[]): FactDescriptor[] {
@@ -1071,7 +1129,7 @@ function compareUnsupportedDescriptors(left: UnsupportedDescriptor, right: Unsup
     provider: right.providerKey,
     evidence: right.evidence.nativeEvidence.id,
   });
-  return leftKey.localeCompare(rightKey);
+  return compareCodeUnits(leftKey, rightKey);
 }
 
 function sortUnsupportedDescriptors(values: readonly UnsupportedDescriptor[]): UnsupportedDescriptor[] {
@@ -1079,23 +1137,23 @@ function sortUnsupportedDescriptors(values: readonly UnsupportedDescriptor[]): U
 }
 
 function compareMatrixRows(left: MatrixFactRecord, right: MatrixFactRecord): number {
-  const repository = stableSerialize(left.repository).localeCompare(stableSerialize(right.repository));
+  const repository = compareCodeUnits(stableSerialize(left.repository), stableSerialize(right.repository));
   if (repository !== 0) return repository;
-  const factClass = left.factClass.localeCompare(right.factClass);
+  const factClass = compareCodeUnits(left.factClass, right.factClass);
   if (factClass !== 0) return factClass;
-  return left.key.localeCompare(right.key);
+  return compareCodeUnits(left.key, right.key);
 }
 
 function compareVariants(left: MatrixFactVariant, right: MatrixFactVariant): number {
-  return left.key.localeCompare(right.key);
+  return compareCodeUnits(left.key, right.key);
 }
 
 function comparePairwiseOverlap(left: PairwiseOverlap, right: PairwiseOverlap): number {
-  const provider = providerKey(left.left).localeCompare(providerKey(right.left));
+  const provider = compareCodeUnits(providerKey(left.left), providerKey(right.left));
   if (provider !== 0) return provider;
-  const rightProvider = providerKey(left.right).localeCompare(providerKey(right.right));
+  const rightProvider = compareCodeUnits(providerKey(left.right), providerKey(right.right));
   if (rightProvider !== 0) return rightProvider;
-  return left.factClass.localeCompare(right.factClass);
+  return compareCodeUnits(left.factClass, right.factClass);
 }
 
 function uniqueProviders(values: readonly ProviderIdentity[]): ProviderIdentity[] {
@@ -1117,6 +1175,14 @@ function setsEqual(left: ReadonlySet<string>, right: ReadonlySet<string>): boole
   if (left.size !== right.size) return false;
   for (const value of left) if (!right.has(value)) return false;
   return true;
+}
+
+/**
+ * Deterministic ordering independent of host locale/ICU data. Artifact
+ * ordering must reproduce identically across machines.
+ */
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function stableSerialize(value: unknown): string {
@@ -1365,9 +1431,65 @@ function escapeMarkdown(value: string): string {
   return value.replaceAll("|", "\\|").replaceAll("\n", " ");
 }
 
+function projectMatrixEntity(entity: MatrixEntityReference): MatrixEntityRefProjection {
+  return {
+    provider: entity.provider,
+    nativeId: entity.nativeId,
+    ...(entity.canonicalId === undefined ? {} : { canonicalId: entity.canonicalId }),
+    candidateCanonicalIds: entity.candidateCanonicalIds,
+  };
+}
+
+function projectMatrixObject(object: MatrixFactObject): MatrixFactObjectProjection {
+  if (object.kind === "value") return object;
+  return { kind: "entity", entity: projectMatrixEntity(object.entity) };
+}
+
+function projectMatrixVariant(variant: MatrixFactVariant): MatrixFactVariantProjection {
+  return {
+    key: variant.key,
+    factIds: variant.factIds,
+    evidenceIds: variant.evidenceIds,
+    providers: variant.providers,
+    subject: projectMatrixEntity(variant.subject),
+    predicate: variant.predicate,
+    object: projectMatrixObject(variant.object),
+  };
+}
+
+/**
+ * Projects a row for persistence: `variants[].subject`/`object` are reduced
+ * from full entity copies (kind/path/range) to identity references, since
+ * the full entity is already persisted once per fact in
+ * normalized/facts.json and reachable through `factIds`/`evidenceIds`.
+ */
+function projectMatrixRow(row: MatrixFactRecord): MatrixFactRecordProjection {
+  return {
+    key: row.key,
+    logicalKey: row.logicalKey,
+    repository: row.repository,
+    factClass: row.factClass,
+    predicate: row.predicate,
+    state: row.state,
+    comparisonPossible: row.comparisonPossible,
+    correlationStatus: row.correlationStatus,
+    variants: row.variants.map(projectMatrixVariant),
+    providerStates: row.providerStates,
+    observedProviders: row.observedProviders,
+    missingProviders: row.missingProviders,
+  };
+}
+
 /**
  * Writes aggregate and sliced machine-readable artifacts plus the report.
  * The writer performs no provider execution and no normalization.
+ *
+ * `normalized/facts.json` is the source of truth for full fact/evidence
+ * detail. Every persisted row here carries only aggregate counts plus
+ * `factIds`/`evidenceIds`/`canonicalId` references back to it -- no fact
+ * envelope (path/range/provider-native payload) is re-embedded. `matrix.json`
+ * itself omits the full row set and per-state row slices, since those are
+ * exactly what `overlap.json`/`conflicts.json`/`unmatched.json` persist.
  */
 export async function writeProviderMatrixArtifacts(
   runRoot: string,
@@ -1382,7 +1504,34 @@ export async function writeProviderMatrixArtifacts(
   const unmatchedPath = path.join(matrixRoot, "unmatched.json");
   const informationGainPath = path.join(matrixRoot, "information-gain.json");
   const reportPath = path.join(runRoot, "report.md");
-  await writeJson(matrixPath, matrix);
+
+  const conflictRows = matrix.conflicts.map(projectMatrixRow);
+  const overlapRows = matrix.overlap.facts.map(projectMatrixRow);
+  const unmatchedAmbiguous = matrix.unmatched.ambiguous.map(projectMatrixRow);
+  const unmatchedUnmatched = matrix.unmatched.unmatched.map(projectMatrixRow);
+  const unmatchedUnsupported = matrix.unmatched.unsupported.map(projectMatrixRow);
+
+  await writeJson(matrixPath, {
+    schemaVersion: matrix.schemaVersion,
+    inputFactSchemaVersion: matrix.inputFactSchemaVersion,
+    generatedBy: matrix.generatedBy,
+    repositories: matrix.repositories,
+    providers: matrix.providers,
+    additionOrder: matrix.additionOrder,
+    metricDefinitions: matrix.metricDefinitions,
+    rowCounts: {
+      total: matrix.facts.length,
+      coverageProviders: matrix.coverage.length,
+      overlapPairwise: matrix.overlap.pairwise.length,
+      overlapAllProviders: matrix.overlap.allProviders.length,
+      overlapFacts: overlapRows.length,
+      conflicts: conflictRows.length,
+      unmatchedAmbiguous: unmatchedAmbiguous.length,
+      unmatchedUnmatched: unmatchedUnmatched.length,
+      unmatchedUnsupported: unmatchedUnsupported.length,
+      informationGain: matrix.informationGain.length,
+    },
+  });
   await writeJson(coveragePath, {
     schemaVersion: matrix.schemaVersion,
     metricDefinitions: matrix.metricDefinitions,
@@ -1394,19 +1543,30 @@ export async function writeProviderMatrixArtifacts(
     schemaVersion: matrix.schemaVersion,
     metricDefinitions: matrix.metricDefinitions,
     repositories: matrix.repositories,
-    overlap: matrix.overlap,
+    overlap: {
+      pairwise: matrix.overlap.pairwise,
+      allProviders: matrix.overlap.allProviders,
+      facts: overlapRows,
+    },
   });
   await writeJson(conflictsPath, {
     schemaVersion: matrix.schemaVersion,
     metricDefinitions: matrix.metricDefinitions,
     repositories: matrix.repositories,
-    conflicts: matrix.conflicts,
+    conflicts: conflictRows,
   });
   await writeJson(unmatchedPath, {
     schemaVersion: matrix.schemaVersion,
     metricDefinitions: matrix.metricDefinitions,
     repositories: matrix.repositories,
-    unmatched: matrix.unmatched,
+    // `records` (ambiguous+unmatched+unsupported combined) is omitted: it
+    // duplicated the three arrays above in full. A reader that needs the
+    // combined set concatenates them; each row already carries `state`.
+    unmatched: {
+      ambiguous: unmatchedAmbiguous,
+      unmatched: unmatchedUnmatched,
+      unsupported: unmatchedUnsupported,
+    },
   });
   await writeJson(informationGainPath, {
     schemaVersion: matrix.schemaVersion,
@@ -1446,14 +1606,13 @@ export async function writeNormalizedFactsArtifact(
   const handle = await open(filePath, "w");
   const writer = new JsonArtifactWriter(handle);
   try {
-    const artifact = {
-      schemaVersion: FACT_SCHEMA_VERSION,
-      facts: input.facts.map(persistFactEnvelope),
-      unsupported: input.unsupported.map(persistUnsupportedEvidence),
-      correlation: input.correlation,
-    };
-    await writer.writeValue(artifact);
-    await writer.write("\n");
+    await writer.write(`{"schemaVersion":${FACT_SCHEMA_VERSION},"facts":`);
+    await writer.writeArray(input.facts, persistFactEnvelope);
+    await writer.write(`,"unsupported":`);
+    await writer.writeArray(input.unsupported, persistUnsupportedEvidence);
+    await writer.write(`,"correlation":`);
+    await writer.writeValue(input.correlation);
+    await writer.write("}\n");
     await writer.flush();
   } finally {
     await handle.close();
@@ -1462,49 +1621,264 @@ export async function writeNormalizedFactsArtifact(
 }
 
 /**
- * The in-memory envelope retains providerNative as a convenience alias, while
- * the persisted artifact stores the payload once under nativeEvidence and
- * replaces duplicate aliases with an auditable local reference.
+ * The in-memory envelope carries the provider-native payload in three
+ * places (`providerNative`, `nativeEvidence.providerNative`, and
+ * `nativeEvidence.observation.providerNative`). Persisting all three
+ * verbatim would triple the artifact's size for no benefit, so the payload
+ * is retained once under `nativeEvidence.providerNative` and the other two
+ * locations become `$ref` pointers that `resolveNativeEvidenceRefs` (used by
+ * `readNormalizedFactsArtifact`) expands back on read.
  */
 function persistFactEnvelope(fact: FactEnvelope): FactEnvelope {
-  const reference = { $ref: `nativeEvidence:${fact.nativeEvidence.id}/providerNative` };
+  const reference = nativeEvidenceRef(fact.nativeEvidence.id);
   return {
     ...fact,
     providerNative: reference,
     nativeEvidence: {
       ...fact.nativeEvidence,
-      providerNative: fact.nativeEvidence.providerNative,
       observation: { ...fact.nativeEvidence.observation, providerNative: reference },
     },
   };
 }
 
 function persistUnsupportedEvidence(evidence: UnsupportedProviderEvidence): UnsupportedProviderEvidence {
-  const reference = { $ref: `nativeEvidence:${evidence.nativeEvidence.id}/providerNative` };
+  const reference = nativeEvidenceRef(evidence.nativeEvidence.id);
   return {
     ...evidence,
     providerNative: reference,
     nativeEvidence: {
       ...evidence.nativeEvidence,
-      providerNative: evidence.nativeEvidence.providerNative,
       observation: { ...evidence.nativeEvidence.observation, providerNative: reference },
     },
   };
 }
 
+function nativeEvidenceRef(nativeEvidenceId: string): { readonly $ref: string } {
+  return { $ref: `nativeEvidence:${nativeEvidenceId}/providerNative` };
+}
 
+const NATIVE_EVIDENCE_REF_PATTERN = /^nativeEvidence:(.+)\/providerNative$/u;
 
-/** Reads a persisted #11 normalized-facts artifact without running providers. */
-export async function readNormalizedFactsArtifact(filePath: string): Promise<NormalizedFactsArtifact> {
-  const parsed: unknown = JSON.parse(await readFile(filePath, "utf8"));
-  if (!isRecord(parsed)) throw new Error("normalized fact artifact must be an object");
-  if (parsed.schemaVersion !== FACT_SCHEMA_VERSION) {
-    throw new Error("normalized fact artifact schemaVersion must be " + FACT_SCHEMA_VERSION);
+/**
+ * Resolves every `$ref` produced by `persistFactEnvelope`/`persistUnsupportedEvidence`
+ * back to the retained `nativeEvidence.providerNative` payload, so a reader
+ * of the persisted artifact recovers the exact in-memory envelope shape.
+ */
+function resolveNativeEvidenceRefs(record: { facts: unknown[]; unsupported: unknown[] }): void {
+  const byId = new Map<string, unknown>();
+  for (const item of [...record.facts, ...record.unsupported]) {
+    const entry = asRecord(item);
+    const nativeEvidence = entry === undefined ? undefined : asRecord(entry.nativeEvidence);
+    const id = nativeEvidence?.id;
+    if (typeof id === "string" && nativeEvidence !== undefined) byId.set(id, nativeEvidence.providerNative);
   }
-  if (!Array.isArray(parsed.facts)) throw new Error("normalized fact artifact facts must be an array");
-  if (!Array.isArray(parsed.unsupported)) throw new Error("normalized fact artifact unsupported must be an array");
-  if (!isRecord(parsed.correlation)) throw new Error("normalized fact artifact correlation must be an object");
-  return parsed as unknown as NormalizedFactsArtifact;
+  const resolve = (value: unknown): unknown => {
+    const record = asRecord(value);
+    const ref = typeof record?.$ref === "string" ? NATIVE_EVIDENCE_REF_PATTERN.exec(record.$ref) : null;
+    if (ref === null) return value;
+    const target = byId.get(ref[1]);
+    return target === undefined ? value : target;
+  };
+  for (const item of [...record.facts, ...record.unsupported]) {
+    const entry = asRecord(item);
+    if (entry === undefined) continue;
+    entry.providerNative = resolve(entry.providerNative);
+    const nativeEvidence = asRecord(entry.nativeEvidence);
+    if (nativeEvidence === undefined) continue;
+    const observation = asRecord(nativeEvidence.observation);
+    if (observation !== undefined) observation.providerNative = resolve(observation.providerNative);
+  }
+}
+
+/**
+ * Reads a persisted #11 normalized-facts artifact without running providers.
+ *
+ * Mottainai-scale artifacts exceed V8's ~1GB single-string limit, so this
+ * never materializes the whole file as one string (unlike `JSON.parse(await
+ * readFile(filePath, "utf8"))`). It streams the file in chunks and parses
+ * each top-level array element (`facts[i]`, `unsupported[i]`) as its own
+ * JSON string instead, relying on the fixed top-level key order
+ * (`schemaVersion`, `facts`, `unsupported`, `correlation`) that
+ * `writeNormalizedFactsArtifact` always writes.
+ */
+export async function readNormalizedFactsArtifact(filePath: string): Promise<NormalizedFactsArtifact> {
+  const reader = new StreamingNormalizedFactsReader(filePath);
+  const result = await reader.read();
+  resolveNativeEvidenceRefs({ facts: result.facts, unsupported: result.unsupported });
+  return result;
+}
+
+/**
+ * Minimal streaming reader for the fixed shape `writeNormalizedFactsArtifact`
+ * produces. It reads the file in fixed-size chunks and only ever holds one
+ * top-level array element's text in memory at a time, so total file size is
+ * not bounded by V8's single-string length limit.
+ */
+class StreamingNormalizedFactsReader {
+  private buffer = "";
+  private position = 0;
+  private handle: Awaited<ReturnType<typeof open>> | undefined;
+  private eof = false;
+
+  constructor(private readonly filePath: string) {}
+
+  async read(): Promise<NormalizedFactsArtifact> {
+    this.handle = await open(this.filePath, "r");
+    try {
+      await this.expectLiteral("{");
+      await this.expectKey("schemaVersion");
+      const schemaVersion = await this.readJsonScalarUntil(new Set([",", "}"]));
+      if (schemaVersion !== FACT_SCHEMA_VERSION) {
+        throw new Error("normalized fact artifact schemaVersion must be " + FACT_SCHEMA_VERSION);
+      }
+      await this.expectSeparatorThenKey("facts");
+      const facts = await this.readJsonArray();
+      await this.expectSeparatorThenKey("unsupported");
+      const unsupported = await this.readJsonArray();
+      await this.expectSeparatorThenKey("correlation");
+      const correlation = await this.readJsonValueUntil(new Set([",", "}"]));
+      if (!isRecord(correlation)) throw new Error("normalized fact artifact correlation must be an object");
+      return {
+        schemaVersion,
+        facts: facts as FactEnvelope[],
+        unsupported: unsupported as UnsupportedProviderEvidence[],
+        correlation: correlation as unknown as CorrelationResult,
+      };
+    } finally {
+      await this.handle.close();
+    }
+  }
+
+  private async fill(): Promise<void> {
+    if (this.eof || this.handle === undefined) return;
+    const chunkSize = 1024 * 1024;
+    const chunk = Buffer.alloc(chunkSize);
+    const { bytesRead } = await this.handle.read(chunk, 0, chunkSize, null);
+    if (bytesRead === 0) {
+      this.eof = true;
+      return;
+    }
+    this.buffer += chunk.toString("utf8", 0, bytesRead);
+  }
+
+  private async ensure(count: number): Promise<void> {
+    while (this.buffer.length - this.position < count && !this.eof) await this.fill();
+  }
+
+  private async peek(): Promise<string | undefined> {
+    await this.ensure(1);
+    return this.buffer[this.position];
+  }
+
+  private compact(): void {
+    if (this.position > 4 * 1024 * 1024) {
+      this.buffer = this.buffer.slice(this.position);
+      this.position = 0;
+    }
+  }
+
+  private async skipWhitespace(): Promise<void> {
+    for (;;) {
+      const char = await this.peek();
+      if (char === undefined || !/\s/u.test(char)) return;
+      this.position += 1;
+      this.compact();
+    }
+  }
+
+  private async expectLiteral(literal: string): Promise<void> {
+    await this.skipWhitespace();
+    await this.ensure(literal.length);
+    if (this.buffer.slice(this.position, this.position + literal.length) !== literal) {
+      throw new Error("normalized fact artifact malformed near byte " + this.position);
+    }
+    this.position += literal.length;
+    this.compact();
+  }
+
+  private async expectKey(key: string): Promise<void> {
+    await this.expectLiteral(JSON.stringify(key));
+    await this.expectLiteral(":");
+  }
+
+  private async expectSeparatorThenKey(key: string): Promise<void> {
+    await this.expectLiteral(",");
+    await this.expectKey(key);
+  }
+
+  /** Reads raw JSON text up to (not including) the first unnested delimiter, then parses it. */
+  private async readJsonValueUntil(delimiters: ReadonlySet<string>): Promise<unknown> {
+    const text = await this.readRawJsonUntil(delimiters);
+    return JSON.parse(text);
+  }
+
+  private async readJsonScalarUntil(delimiters: ReadonlySet<string>): Promise<number> {
+    const value = await this.readJsonValueUntil(delimiters);
+    if (typeof value !== "number") throw new Error("normalized fact artifact expected a numeric field");
+    return value;
+  }
+
+  /** Reads raw top-level JSON text (object/array/scalar) up to an unnested delimiter, without consuming it. */
+  private async readRawJsonUntil(delimiters: ReadonlySet<string>): Promise<string> {
+    await this.skipWhitespace();
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let start = this.position;
+    let text = "";
+    for (;;) {
+      const char = await this.peek();
+      if (char === undefined) throw new Error("normalized fact artifact ended unexpectedly");
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+      } else if (char === '"') {
+        inString = true;
+      } else if (char === "{" || char === "[") {
+        depth += 1;
+      } else if (char === "}" || char === "]") {
+        depth -= 1;
+      } else if (depth === 0 && delimiters.has(char)) {
+        text += this.buffer.slice(start, this.position);
+        return text;
+      }
+      this.position += 1;
+      if (this.buffer.length - this.position < 2 && !this.eof) {
+        text += this.buffer.slice(start, this.position);
+        await this.fill();
+        start = this.position;
+      }
+      this.compact();
+      if (this.position < start) start = this.position;
+    }
+  }
+
+  /** Streams a top-level JSON array, parsing one element at a time. */
+  private async readJsonArray(): Promise<unknown[]> {
+    await this.expectLiteral("[");
+    const values: unknown[] = [];
+    await this.skipWhitespace();
+    if ((await this.peek()) === "]") {
+      this.position += 1;
+      this.compact();
+      return values;
+    }
+    for (;;) {
+      const text = await this.readRawJsonUntil(new Set([",", "]"]));
+      values.push(JSON.parse(text));
+      await this.skipWhitespace();
+      const delimiter = await this.peek();
+      this.position += 1;
+      this.compact();
+      if (delimiter === "]") return values;
+      if (delimiter !== ",") throw new Error("normalized fact artifact malformed array near byte " + this.position);
+    }
+  }
 }
 
 /** Reads a persisted normalized artifact and generates its deterministic matrix. */
@@ -1521,7 +1895,13 @@ function isProviderMatrix(
   return isRecord(value) && value.schemaVersion === PROVIDER_MATRIX_SCHEMA_VERSION && "metricDefinitions" in value;
 }
 
-async function writeJson(filePath: string, value: unknown): Promise<void> {
+/**
+ * Streams a value to disk through `JsonArtifactWriter` instead of building
+ * one `JSON.stringify(value)` string first. Exported so every large
+ * generated artifact (not just the ones matrix.ts itself writes) can avoid
+ * the same V8 string-length limit.
+ */
+export async function writeStreamingJson(filePath: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
   const handle = await open(filePath, "w");
   const writer = new JsonArtifactWriter(handle);
@@ -1534,12 +1914,16 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
   }
 }
 
+async function writeJson(filePath: string, value: unknown): Promise<void> {
+  await writeStreamingJson(filePath, value);
+}
+
 /**
  * Serializes large generated artifacts without first constructing one giant
  * JSON string. Mottainai's TypeScript observation set is large enough for a
  * single JSON.stringify(matrix) call to exceed V8's string limit.
  */
-class JsonArtifactWriter {
+export class JsonArtifactWriter {
   private buffer = "";
 
   constructor(private readonly handle: Awaited<ReturnType<typeof open>>) {}
@@ -1553,6 +1937,20 @@ class JsonArtifactWriter {
     if (this.buffer.length === 0) return;
     await this.handle.write(this.buffer);
     this.buffer = "";
+  }
+
+  /**
+   * Streams a possibly-large array by transforming and serializing one
+   * element at a time, so the whole transformed array is never held in
+   * memory at once (unlike `writeValue(values.map(transform))`).
+   */
+  async writeArray<T>(values: readonly T[], transform: (value: T) => unknown): Promise<void> {
+    await this.write("[");
+    for (let index = 0; index < values.length; index += 1) {
+      if (index > 0) await this.write(",");
+      await this.writeValue(transform(values[index]));
+    }
+    await this.write("]");
   }
 
   async writeValue(value: unknown): Promise<void> {
@@ -1587,6 +1985,10 @@ class JsonArtifactWriter {
     const serialized = JSON.stringify(value);
     await this.write(serialized === undefined ? "null" : serialized);
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
