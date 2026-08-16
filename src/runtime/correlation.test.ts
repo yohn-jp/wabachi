@@ -303,13 +303,31 @@ test("records oversized deterministic candidate buckets instead of materializing
   // full same-key clique. 320 entities per provider gives 320 * 320 =
   // 102,400 potential pairs, just above MAX_CANDIDATE_PAIRS_PER_KEY
   // (100,000) for every key class this fixture activates.
+  //
+  // qualifiedName/aliases use a structured value ("scope".shared, not the
+  // bare token "shared") so they land in the strong qualified-exact/
+  // alias-match-exact classes instead of being folded into name-exact by
+  // isBareToken -- a bare qualifiedName (e.g. what TypeScript's checker
+  // reports for a block-scoped local) is intentionally treated as
+  // no-more-informative-than-a-name and is covered by the dedicated
+  // "many individually-valid weak-name buckets" tests below.
   const perProvider = 320;
   const inputs = [
     ...Array.from({ length: perProvider }, (_, index) =>
-      entity(typescript, `ts-${index}`, { path: "src/large.ts", name: "shared", qualifiedName: "shared" }),
+      entity(typescript, `ts-${index}`, {
+        path: "src/large.ts",
+        name: "shared",
+        qualifiedName: '"scope".shared',
+        aliases: ["scope.sharedAlias"],
+      }),
     ),
     ...Array.from({ length: perProvider }, (_, index) =>
-      entity(scip, `scip-${index}`, { path: "src/large.ts", name: "shared", qualifiedName: "shared" }),
+      entity(scip, `scip-${index}`, {
+        path: "src/large.ts",
+        name: "shared",
+        qualifiedName: '"scope".shared',
+        aliases: ["scope.sharedAlias"],
+      }),
     ),
   ];
   const result = correlateProviderEntities(inputs);

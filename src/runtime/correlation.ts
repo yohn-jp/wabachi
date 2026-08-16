@@ -169,6 +169,8 @@ interface NormalizedEntity {
   readonly key: string;
   /** Cached once at normalization time; avoids re-serializing in hot comparators. */
   readonly providerNativeSerialized: string;
+  /** Cached `providerReferenceKey(toReference(entity))`; avoids re-serializing per edge/sort comparison. */
+  readonly referenceKey: string;
 }
 
 interface CandidateEdge {
@@ -500,6 +502,13 @@ function normalizeEntities(inputs: readonly ProviderEntityInput[]): NormalizedEn
       aliases: aliasKeys,
       signature: signatureKey,
     });
+    const referenceKey = stableSerialize({
+      provider: providerKeyValue,
+      nativeId: id,
+      kind,
+      path: pathNormalized,
+      range: rangeNormalized,
+    });
     return {
       input,
       providerKey: providerKeyValue,
@@ -519,6 +528,7 @@ function normalizeEntities(inputs: readonly ProviderEntityInput[]): NormalizedEn
       signatureKey,
       key,
       providerNativeSerialized,
+      referenceKey,
     };
   });
 
@@ -678,9 +688,27 @@ function candidateKeys(entity: NormalizedEntity): string[] {
     keys.add(`path-signature:${entity.path}:${entity.signatureKey}`);
   }
   if (entity.signatureKey !== undefined) keys.add(`signature:${entity.signatureKey}`);
-  for (const qualifiedKey of entity.qualifiedKeys) keys.add(`qualified-exact:${qualifiedKey}`);
-  for (const aliasKey of entity.aliasKeys) keys.add(`alias-match-exact:${aliasKey}`);
-  for (const qualifiedKey of entity.qualifiedKeys) keys.add(`alias-match-exact:${qualifiedKey}`);
+  // A qualified name/alias that is just a single bare token (no `.`, no
+  // quoted scope prefix -- symbolKeys() didn't split it into more than one
+  // key) carries the same information as a plain name. This happens in
+  // practice: TypeScript's checker.getFullyQualifiedName() returns a bare
+  // identifier for block-scoped locals (it has no module/function-scope
+  // prefix to report), so common local names like `result` or `error`
+  // otherwise look "qualified" and land in the strong qualified-exact
+  // class, where they can produce a single-file same-provider bucket with
+  // hundreds of unrelated locals. Such bare tokens are indexed as the weak
+  // name-exact class instead so their aggregate cost is bounded the same
+  // way plain names are, without losing the match itself (compareEntityPair
+  // still scores it under same-qualified-name/same-alias once compared).
+  for (const qualifiedKey of entity.qualifiedKeys) {
+    keys.add(`${isBareToken(qualifiedKey) ? "name-exact" : "qualified-exact"}:${qualifiedKey}`);
+  }
+  for (const aliasKey of entity.aliasKeys) {
+    keys.add(`${isBareToken(aliasKey) ? "name-exact" : "alias-match-exact"}:${aliasKey}`);
+  }
+  for (const qualifiedKey of entity.qualifiedKeys) {
+    keys.add(`${isBareToken(qualifiedKey) ? "name-exact" : "alias-match-exact"}:${qualifiedKey}`);
+  }
   // A bare token such as "type" or "0" is not a useful cross-file
   // candidate key on its own. `nameKeys` normalization already folds
   // name/qualifiedName/aliases together; index it directly so cross-path
@@ -699,6 +727,11 @@ function candidateKeys(entity: NormalizedEntity): string[] {
     keys.add(`path-kind:${entity.path}:${entity.kindFamily}`);
   }
   return [...keys].sort(compareCodeUnits);
+}
+
+/** A key with no structural separator carries the same information as a bare name. */
+function isBareToken(value: string): boolean {
+  return /^[A-Za-z0-9_$]+$/u.test(value);
 }
 
 function indexEdges(edges: readonly CandidateEdge[], entities: readonly NormalizedEntity[]): EdgeIndex {
@@ -1011,7 +1044,7 @@ function toCanonicalEntity(
 }
 
 function toCanonicalMember(entity: NormalizedEntity): CanonicalEntityMember {
-  return {
+  const member: CanonicalEntityMember = {
     provider: entity.input.provider,
     nativeId: entity.id,
     kind: entity.kind,
@@ -1025,7 +1058,19 @@ function toCanonicalMember(entity: NormalizedEntity): CanonicalEntityMember {
     aliases: entity.aliases,
     providerNative: entity.input.providerNative,
   };
+  referenceKeyCache.set(member, entity.referenceKey);
+  return member;
 }
+
+/**
+ * `providerReferenceKey` is otherwise the single hottest allocation in
+ * large correlations (millions of edges, each needing two sorted
+ * references): every `ProviderEntityReference`/`CanonicalEntityMember`
+ * built from a `NormalizedEntity` is registered here against that entity's
+ * already-computed `referenceKey`, so the `compare*` sort comparators below
+ * do a WeakMap lookup instead of re-serializing the object.
+ */
+const referenceKeyCache = new WeakMap<object, string>();
 
 function toEvidence(edge: CandidateEdge, entities: readonly NormalizedEntity[]): CorrelationEvidence {
   return {
@@ -1052,13 +1097,15 @@ function toCorrelationLink(
 }
 
 function toReference(entity: NormalizedEntity): ProviderEntityReference {
-  return {
+  const reference: ProviderEntityReference = {
     provider: entity.input.provider,
     nativeId: entity.id,
     kind: entity.kind,
     ...(entity.path === undefined ? {} : { path: entity.path }),
     ...(entity.range === undefined ? {} : { range: entity.range }),
   };
+  referenceKeyCache.set(reference, entity.referenceKey);
+  return reference;
 }
 
 function edgeCardinality(
@@ -1163,9 +1210,9 @@ function buildMetrics(
 }
 
 function compareLinks(left: CorrelationLink, right: CorrelationLink): number {
-  const providerCompare = compareCodeUnits(providerReferenceKey(left.left), providerReferenceKey(right.left));
+  const providerCompare = compareCodeUnits(cachedReferenceKey(left.left), cachedReferenceKey(right.left));
   if (providerCompare !== 0) return providerCompare;
-  return compareCodeUnits(providerReferenceKey(left.right), providerReferenceKey(right.right));
+  return compareCodeUnits(cachedReferenceKey(left.right), cachedReferenceKey(right.right));
 }
 
 function compareEdges(left: CandidateEdge, right: CandidateEdge): number {
@@ -1175,13 +1222,18 @@ function compareEdges(left: CandidateEdge, right: CandidateEdge): number {
 }
 
 function compareEvidence(left: CorrelationEvidence, right: CorrelationEvidence): number {
-  const leftCompare = compareCodeUnits(providerReferenceKey(left.left), providerReferenceKey(right.left));
+  const leftCompare = compareCodeUnits(cachedReferenceKey(left.left), cachedReferenceKey(right.left));
   if (leftCompare !== 0) return leftCompare;
-  return compareCodeUnits(providerReferenceKey(left.right), providerReferenceKey(right.right));
+  return compareCodeUnits(cachedReferenceKey(left.right), cachedReferenceKey(right.right));
 }
 
 function compareMembers(left: CanonicalEntityMember, right: CanonicalEntityMember): number {
-  return compareCodeUnits(providerReferenceKey(left), providerReferenceKey(right));
+  return compareCodeUnits(cachedReferenceKey(left), cachedReferenceKey(right));
+}
+
+/** Returns the cached key registered by `toReference`/`toCanonicalMember`, computing it on demand otherwise. */
+function cachedReferenceKey(reference: ProviderEntityReference): string {
+  return referenceKeyCache.get(reference) ?? providerReferenceKey(reference);
 }
 
 function providerReferenceKey(reference: ProviderEntityReference): string {
