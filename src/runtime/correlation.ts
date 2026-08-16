@@ -192,6 +192,21 @@ interface CandidateEdgeBuild {
 const MAX_CANDIDATE_PAIRS_PER_KEY = 100_000;
 /** Safety valve for the sum of materialized pairs across every candidate key. */
 const MAX_TOTAL_CANDIDATE_PAIRS = 2_000_000;
+/**
+ * Weak key classes (bare name/alias matches with no path, kind, or
+ * signature narrowing them) are evidence, not near-unique identity —
+ * `compareEntityPair` only ever scores them 45-48. A single such bucket
+ * with hundreds of members on each side is realistic (a common name shared
+ * across a large codebase) and every one of those pairs would be
+ * individually valid, so the per-key cap alone does not bound the
+ * aggregate: many small buckets can still sum to millions of low-value
+ * edges. Weak buckets get a much tighter per-key bound than strong
+ * (near-unique) evidence, and buckets that exceed it are recorded in
+ * diagnostics rather than expanded — this is a recall/cost trade-off
+ * specific to low-information evidence, not a general correctness bound.
+ */
+const MAX_WEAK_CANDIDATE_PAIRS_PER_KEY = 2_000;
+const WEAK_KEY_CLASSES: ReadonlySet<string> = new Set(["name-exact", "path-name-exact", "path-kind"]);
 
 interface EntityGroup {
   readonly indices: readonly number[];
@@ -577,10 +592,10 @@ function buildCandidateEdges(entities: readonly NormalizedEntity[]): CandidateEd
     // Cross-provider potential pairs only: same-provider pairs never
     // generate a candidate edge, so they must not count against the cap.
     const potentialPairCount = crossProviderPairCount(providerKeys, byProvider);
-    if (
-      potentialPairCount > MAX_CANDIDATE_PAIRS_PER_KEY ||
-      totalMaterializedPairs + potentialPairCount > MAX_TOTAL_CANDIDATE_PAIRS
-    ) {
+    const perKeyLimit = WEAK_KEY_CLASSES.has(keyClassOf(key))
+      ? MAX_WEAK_CANDIDATE_PAIRS_PER_KEY
+      : MAX_CANDIDATE_PAIRS_PER_KEY;
+    if (potentialPairCount > perKeyLimit || totalMaterializedPairs + potentialPairCount > MAX_TOTAL_CANDIDATE_PAIRS) {
       const keyClass = keyClassOf(key);
       const current = skippedByClass.get(keyClass) ?? { keyCount: 0, potentialPairCount: 0 };
       current.keyCount += 1;
@@ -822,10 +837,16 @@ function buildGroups(entities: readonly NormalizedEntity[], edges: readonly Cand
     return survivor;
   };
 
-  const scores = [...new Set(edges.map((edge) => edge.score))].sort((left, right) => right - left);
+  const edgesByScore = new Map<number, CandidateEdge[]>();
+  for (const edge of edges) {
+    const group = edgesByScore.get(edge.score) ?? [];
+    group.push(edge);
+    edgesByScore.set(edge.score, group);
+  }
+  const scores = [...edgesByScore.keys()].sort((left, right) => right - left);
   for (const score of scores) {
-    const bandEdges = edges.filter(
-      (edge) => edge.score === score && !blocked.has(find(edge.left)) && !blocked.has(find(edge.right)),
+    const bandEdges = (edgesByScore.get(score) ?? []).filter(
+      (edge) => !blocked.has(find(edge.left)) && !blocked.has(find(edge.right)),
     );
     if (bandEdges.length === 0) continue;
 

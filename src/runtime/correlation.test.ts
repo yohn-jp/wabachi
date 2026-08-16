@@ -332,3 +332,79 @@ test("records oversized deterministic candidate buckets instead of materializing
     assert.ok(item.potentialPairCount > 100_000);
   }
 });
+
+test("bounds the aggregate cost of many individually-valid weak-name buckets", () => {
+  // Each bucket alone is far below the per-key pair cap (100 * 100 =
+  // 10,000 << 100,000), so a single global/per-key check on strong evidence
+  // would let all 200 buckets through -- 200 * 10,000 = 2,000,000
+  // candidate pairs from bare name matches with no path/qualifiedName/
+  // signature to narrow them. Weak key classes get a much tighter per-key
+  // cap (MAX_WEAK_CANDIDATE_PAIRS_PER_KEY) specifically so this shape is
+  // bounded without relying on the aggregate safety valve.
+  const bucketSize = 100;
+  const bucketCount = 200;
+  const inputs: ProviderEntityInput[] = [];
+  for (let bucket = 0; bucket < bucketCount; bucket += 1) {
+    const name = `shared${bucket}`;
+    for (let index = 0; index < bucketSize; index += 1) {
+      inputs.push(entity(typescript, `ts-${bucket}-${index}`, { path: undefined, name, qualifiedName: undefined }));
+    }
+    for (let index = 0; index < bucketSize; index += 1) {
+      inputs.push(
+        entity(scip, `scip-${bucket}-${index}`, { path: undefined, name, qualifiedName: undefined, kind: "symbol" }),
+      );
+    }
+  }
+
+  const start = process.hrtime.bigint();
+  const result = correlateProviderEntities(inputs);
+  const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+
+  assert.equal(result.links.length, 0);
+  assert.equal(result.diagnostics.skippedKeyCount, bucketCount);
+  assert.ok(elapsedMs < 5_000, `expected the weak-bucket cap to keep this under 5s, took ${elapsedMs}ms`);
+});
+
+test("still compares small weak-name buckets pairwise instead of skipping them", () => {
+  // A bucket below MAX_WEAK_CANDIDATE_PAIRS_PER_KEY must still be fully
+  // compared -- the weak-class cap must not regress recall for the common
+  // case of a handful of same-named entities.
+  const result = correlateProviderEntities([
+    entity(typescript, "ts-helper", { path: undefined, name: "helper", qualifiedName: undefined }),
+    entity(scip, "scip-helper", { path: undefined, name: "helper", qualifiedName: undefined, kind: "symbol" }),
+  ]);
+  assert.equal(result.diagnostics.skippedKeyCount, 0);
+  assert.equal(result.links.length, 1);
+  assert.equal(result.links[0]?.rules.includes("same-name"), true);
+});
+
+test("produces identical canonical identities regardless of input order at scale", () => {
+  const build = (): ProviderEntityInput[] => {
+    const inputs: ProviderEntityInput[] = [];
+    const symbolsPerFile = 20;
+    for (let index = 0; index < 400; index += 1) {
+      const fileIndex = Math.floor(index / symbolsPerFile);
+      const lineInFile = (index % symbolsPerFile) + 1;
+      const path = `src/order${fileIndex}.ts`;
+      const range = `L${lineInFile}C1-L${lineInFile}C10`;
+      const name = `sym${index}`;
+      inputs.push(entity(typescript, `ts-${index}`, { path, range, name, qualifiedName: name }));
+      inputs.push(entity(scip, `scip-${index}`, { path, range, name, qualifiedName: name, kind: "symbol" }));
+    }
+    return inputs;
+  };
+  const forward = build();
+  const reversed = [...forward].reverse();
+
+  const forwardResult = correlateProviderEntities(forward);
+  const reversedResult = correlateProviderEntities(reversed);
+
+  assert.deepEqual(
+    forwardResult.canonicalEntities.map((item) => item.canonicalId),
+    reversedResult.canonicalEntities.map((item) => item.canonicalId),
+  );
+  assert.equal(
+    forwardResult.canonicalEntities.every((item) => item.status === "matched"),
+    true,
+  );
+});
