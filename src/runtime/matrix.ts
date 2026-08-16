@@ -811,17 +811,18 @@ function buildOverlap(
   factClasses: readonly string[],
   rows: readonly MatrixFactRecord[],
 ): ProviderMatrixOverlap {
+  const index = indexComparableFactSets(facts, entries, factClasses);
   const pairwise: PairwiseOverlap[] = [];
   for (let leftIndex = 0; leftIndex < entries.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < entries.length; rightIndex += 1) {
       const left = entries[leftIndex];
       const right = entries[rightIndex];
       for (const factClass of factClasses) {
-        pairwise.push(buildPairwiseOverlap(left, right, factClass, facts));
+        pairwise.push(buildPairwiseOverlap(left, right, factClass, index));
       }
     }
   }
-  const allProviders = factClasses.map((factClass) => buildAllProviderOverlap(providers, entries, factClass, facts));
+  const allProviders = factClasses.map((factClass) => buildAllProviderOverlap(providers, entries, factClass, index));
   return {
     pairwise: pairwise.sort(comparePairwiseOverlap),
     allProviders: allProviders.sort((left, right) => left.factClass.localeCompare(right.factClass)),
@@ -829,14 +830,48 @@ function buildOverlap(
   };
 }
 
+/**
+ * Groups comparable facts by provider and fact class once so pairwise and
+ * all-provider overlap can look up a set instead of re-scanning every fact
+ * descriptor for every provider pair. Without this index, overlap
+ * construction is O(providers^2 x factClasses x facts), which took minutes
+ * and pegged a CPU core against the real TypeScript provider's fact volume.
+ */
+function indexComparableFactSets(
+  facts: readonly FactDescriptor[],
+  entries: readonly ProviderIdentityEntry[],
+  factClasses: readonly string[],
+): ReadonlyMap<string, ComparableFactSets> {
+  const index = new Map<string, ComparableFactSets>();
+  for (const entry of entries) {
+    for (const factClass of factClasses) {
+      index.set(indexKey(entry.key, factClass), { byLogical: new Map() });
+    }
+  }
+  for (const descriptor of facts) {
+    if (!descriptor.comparable || descriptor.logicalKey === undefined) continue;
+    const key = indexKey(descriptor.providerKey, descriptor.factClass);
+    const entry = index.get(key);
+    if (entry === undefined) continue;
+    const values = (entry.byLogical as Map<string, Set<string>>).get(descriptor.logicalKey) ?? new Set<string>();
+    values.add(descriptor.exactKey);
+    (entry.byLogical as Map<string, Set<string>>).set(descriptor.logicalKey, values);
+  }
+  return index;
+}
+
+function indexKey(providerKeyValue: string, factClass: string): string {
+  return providerKeyValue + " " + factClass;
+}
+
 function buildPairwiseOverlap(
   left: ProviderIdentityEntry,
   right: ProviderIdentityEntry,
   factClass: string,
-  facts: readonly FactDescriptor[],
+  index: ReadonlyMap<string, ComparableFactSets>,
 ): PairwiseOverlap {
-  const leftSets = comparableFactSets(facts, left.key, factClass);
-  const rightSets = comparableFactSets(facts, right.key, factClass);
+  const leftSets = index.get(indexKey(left.key, factClass)) ?? { byLogical: new Map() };
+  const rightSets = index.get(indexKey(right.key, factClass)) ?? { byLogical: new Map() };
   const logicalKeys = new Set([...leftSets.byLogical.keys(), ...rightSets.byLogical.keys()]);
   const overlapFactKeys = intersection(exactKeys(leftSets.byLogical), exactKeys(rightSets.byLogical));
   const leftOnly = [...leftSets.byLogical.keys()].filter((key) => !rightSets.byLogical.has(key)).sort();
@@ -870,9 +905,9 @@ function buildAllProviderOverlap(
   providers: readonly ProviderIdentity[],
   entries: readonly ProviderIdentityEntry[],
   factClass: string,
-  facts: readonly FactDescriptor[],
+  index: ReadonlyMap<string, ComparableFactSets>,
 ): AllProviderOverlap {
-  const exactSets = entries.map((entry) => comparableFactSets(facts, entry.key, factClass));
+  const exactSets = entries.map((entry) => index.get(indexKey(entry.key, factClass)) ?? { byLogical: new Map() });
   const exactKeySets = exactSets.map((set) => new Set(exactKeys(set.byLogical)));
   const union = new Set<string>();
   for (const keys of exactKeySets) for (const key of keys) union.add(key);
@@ -889,18 +924,6 @@ function buildAllProviderOverlap(
     allProviderOverlapCoverage: ratio(overlap.length, union.size),
     overlapFactKeys: overlap,
   };
-}
-
-function comparableFactSets(facts: readonly FactDescriptor[], provider: string, factClass: string): ComparableFactSets {
-  const byLogical = new Map<string, Set<string>>();
-  for (const descriptor of facts) {
-    if (!descriptor.comparable || descriptor.providerKey !== provider || descriptor.factClass !== factClass) continue;
-    if (descriptor.logicalKey === undefined) continue;
-    const values = byLogical.get(descriptor.logicalKey) ?? new Set<string>();
-    values.add(descriptor.exactKey);
-    byLogical.set(descriptor.logicalKey, values);
-  }
-  return { byLogical };
 }
 
 function buildInformationGain(
