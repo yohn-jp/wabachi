@@ -27,6 +27,7 @@
     "prepublishOnly": "pnpm run typecheck && pnpm test"
   },
   "dependencies": {
+    "@sourcegraph/scip-typescript": "0.4.0",
     "typescript": "^6.0.3"
   },
   "devDependencies": {
