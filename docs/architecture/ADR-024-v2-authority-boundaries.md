@@ -65,10 +65,12 @@ rewrite:
   durable identity across revisions;
 - one provider-to-Matrix workflow is not a resumable stage model.
 
-Generated or inferred information is evidence. It becomes canonical only when
-an explicit review/admission operation creates a canonical declaration. A
-canonical declaration can later be stale or conflict with current evidence;
-regeneration must not silently replace it.
+Generated or inferred information (observations, derived facts, findings,
+claims) references or is derived from evidence, but is not itself immutable
+evidence. It becomes canonical only when an explicit review/admission
+operation creates a canonical declaration. A canonical declaration can later
+be stale or conflict with current evidence; regeneration must not silently
+replace it.
 
 ## Authority and processing paths
 
@@ -179,8 +181,11 @@ The following are invariants, not implementation suggestions:
 - A rename or move may preserve a canonical ID only through an explicit,
   auditable continuity resolution. No heuristic may silently assert continuity.
 - An ambiguous or incomplete resolution produces an ambiguity set and no
-  guessed canonical assignment. Consumers must be able to distinguish
-  unmatched, ambiguous, and resolved states.
+  guessed canonical assignment. Interrupted or capped processing is represented
+  with an explicit incomplete/unknown state plus a candidate-set completeness
+  marker. "Ambiguous" is reserved for complete evaluations that yielded
+  multiple candidates. Consumers must be able to distinguish unmatched,
+  incomplete, ambiguous, and resolved states.
 - Every historical resolution records its input revision-local instances,
   candidate set, algorithm/rule version, evidence references, decision, and
   actor or automated process. Replaying a later algorithm does not rewrite the
@@ -203,6 +208,13 @@ stages such as `provider-execution`, `evidence-catalog`, `observation-import`,
 - status, start/finish timestamps, diagnostics, and resource limits;
 - a checkpoint/cursor when the stage supports resume; and
 - attempt identity and an idempotency key for retry.
+
+The idempotency key is scoped to the combination of stage, input references,
+and implementation version. When a request with a matching key already exists,
+the behavior depends on whether the inputs match: if inputs match, the
+existing output is reused; if inputs conflict, the request is rejected without
+partial persistence. Checkpoint, authoritative output, and audit-event
+publication occur atomically.
 
 The minimum status vocabulary is `pending`, `running`, `complete`,
 `incomplete`, `failed`, and `cancelled`. `incomplete` is not a successful
@@ -270,9 +282,13 @@ Migration preserves domain meaning and IDs:
 2. Install the PostgreSQL-class adapter implementing the same domain boundary.
 3. Copy logical rows, event order, IDs, schema versions, foreign-key
    references, and stage/checkpoint state; do not reinterpret provider or
-   canonical identity.
+   canonical identity. Each audit record includes an immutable, monotonic
+   ordering field (or equivalent transaction-and-causation chain) to preserve
+   event order across adapters.
 4. Move or retain CAS objects by digest and verify object digests, row counts,
-   unique constraints, references, and audit ordering.
+   unique constraints, references, and audit ordering. Use the audit record
+   ordering for source watermarks, replay, and reconciliation instead of
+   timestamps or physical row order.
 5. Run a reconciliation from the source watermark, cut over writes, and keep
    the embedded snapshot as a recoverable read-only backup until the migration
    is accepted.
@@ -303,7 +319,12 @@ The boundary must preserve these semantics on every initial adapter:
 - unique constraints for domain keys and idempotency keys;
 - deterministic ordered queries wherever order affects output or resume;
 - durable stage/checkpoint state;
-- append-only/audit semantics for canonical mutations and review events; and
+- append-only/audit semantics for canonical mutations and review events,
+  requiring an expected prior declaration version or compare-and-set
+  precondition for concurrent canonical mutations (when the precondition fails,
+  the mutation is rejected and the caller must retry with current state); the
+  canonical-head update and corresponding audit event succeed atomically
+  without depending on backend-specific locking; and
 - ordinary SQL joins and indexed lookups for the core query paths.
 
 The initial core schema deliberately forbids making domain meaning depend on
@@ -317,8 +338,8 @@ backend-specific features, including:
   only enforcement of domain invariants;
 - vendor-specific isolation/locking behavior or a dialect-specific upsert as
   the only way to achieve correctness; and
-- database-specific materialized views or query syntax as the authority's
-  required read path.
+- database-specific materialized views or query syntax as the required read
+  path for the authority.
 
 Portable scalar columns, application-assigned IDs, validated text metadata,
 normal indexes, foreign keys, and ordinary joins are sufficient for the first
