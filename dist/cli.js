@@ -4,6 +4,7 @@ import path from "node:path";
 import { createFixtureProvider } from "./runtime/fixtureProvider.js";
 import { createGraftProvider } from "./runtime/graftProvider.js";
 import { run } from "./runtime/run.js";
+import { createScipTypescriptProvider } from "./runtime/scipProvider.js";
 import { createTypeScriptProvider } from "./runtime/typescriptProvider.js";
 export async function runCli(argv) {
     const command = argv[0];
@@ -37,7 +38,12 @@ async function runRunCommand(args) {
             source,
             revision,
             runRoot,
-            providers: [createFixtureProvider(), createTypeScriptProvider(), createGraftProvider()],
+            providers: [
+                createFixtureProvider(),
+                createTypeScriptProvider(),
+                createGraftProvider(),
+                createScipTypescriptProvider(),
+            ],
         });
         console.log(manifestPath);
         return 0;
