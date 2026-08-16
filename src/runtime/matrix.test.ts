@@ -190,6 +190,30 @@ test("persists normalized input and produces auditable matrix artifacts without 
     assert.match(report, /Unique comparable evidence/u);
     assert.match(report, /Disagreement details/u);
     assert.equal(renderProviderMatrixReport(fromArtifact), report);
+
+    const persistedMatrix = JSON.parse(await readFile(paths.matrixPath, "utf8"));
+    assert.equal("facts" in persistedMatrix, false);
+    assert.equal("coverage" in persistedMatrix, false);
+    assert.equal("overlap" in persistedMatrix, false);
+    assert.equal("conflicts" in persistedMatrix, false);
+    assert.equal("unmatched" in persistedMatrix, false);
+    assert.equal(persistedMatrix.rowCounts.conflicts, fromArtifact.conflicts.length);
+    assert.equal(persistedMatrix.rowCounts.total, fromArtifact.facts.length);
+
+    const persistedConflicts = JSON.parse(await readFile(paths.conflictsPath, "utf8"));
+    const conflictRow = persistedConflicts.conflicts[0];
+    const conflictVariant = conflictRow.variants[0];
+    assert.equal("path" in conflictVariant.subject, false);
+    assert.equal("range" in conflictVariant.subject, false);
+    assert.equal("kind" in conflictVariant.subject, false);
+    assert.ok(Array.isArray(conflictVariant.factIds) && conflictVariant.factIds.length > 0);
+    assert.equal(typeof conflictVariant.subject.nativeId, "string");
+
+    const persistedNormalized = JSON.parse(await readFile(normalizedPath, "utf8"));
+    const persistedFactIds = new Set(persistedNormalized.facts.map((fact: { factId: string }) => fact.factId));
+    for (const factId of conflictVariant.factIds as readonly string[]) {
+      assert.equal(persistedFactIds.has(factId), true);
+    }
   } finally {
     await rm(runRoot, { recursive: true, force: true });
   }
