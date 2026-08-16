@@ -296,3 +296,20 @@ test("extracts provider-native identities from the existing observation envelope
   assert.equal(result.metrics["scip-typescript"]?.matched, 1);
   assert.equal(result.metrics.typescript?.total, 1);
 });
+
+test("records oversized deterministic candidate buckets instead of materializing an edge explosion", () => {
+  const inputs = [
+    ...Array.from({ length: 225 }, (_, index) =>
+      entity(typescript, `ts-${index}`, { path: "src/large.ts", name: "shared", qualifiedName: "shared" }),
+    ),
+    ...Array.from({ length: 225 }, (_, index) =>
+      entity(scip, `scip-${index}`, { path: "src/large.ts", name: "shared", qualifiedName: "shared" }),
+    ),
+  ];
+  const result = correlateProviderEntities(inputs);
+
+  assert.equal(result.links.length, 0);
+  assert.ok(result.diagnostics.skippedKeyCount > 0);
+  assert.ok(result.diagnostics.skippedPotentialPairCount > 100_000);
+  assert.equal(result.diagnostics.maxCandidatePairsPerKey, 100_000);
+});

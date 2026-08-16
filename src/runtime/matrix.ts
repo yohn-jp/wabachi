@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   FACT_SCHEMA_VERSION,
@@ -873,12 +873,13 @@ function buildAllProviderOverlap(
   facts: readonly FactDescriptor[],
 ): AllProviderOverlap {
   const exactSets = entries.map((entry) => comparableFactSets(facts, entry.key, factClass));
+  const exactKeySets = exactSets.map((set) => new Set(exactKeys(set.byLogical)));
   const union = new Set<string>();
-  for (const set of exactSets) for (const key of exactKeys(set.byLogical)) union.add(key);
+  for (const keys of exactKeySets) for (const key of keys) union.add(key);
   const overlap =
     entries.length === 0
       ? []
-      : [...union].filter((key) => exactSets.every((set) => exactKeys(set.byLogical).includes(key))).sort();
+      : [...union].filter((key) => exactKeySets.every((keys) => keys.has(key))).sort();
   return {
     factClass,
     providers,
@@ -916,6 +917,7 @@ function buildInformationGain(
     const providerFacts = facts.filter((descriptor) => descriptor.providerKey === entry.key && descriptor.comparable);
     const exactKeysForProvider = [...new Set(providerFacts.map((descriptor) => descriptor.exactKey))].sort();
     const newComparableFactKeys = exactKeysForProvider.filter((key) => !baseline.has(key));
+    const newComparableFactKeySet = new Set(newComparableFactKeys);
     const classCounts = factClasses
       .map((factClass) => {
         const classKeys = new Set(
@@ -923,7 +925,7 @@ function buildInformationGain(
             .filter((descriptor) => descriptor.factClass === factClass)
             .map((descriptor) => descriptor.exactKey),
         );
-        const newKeys = [...classKeys].filter((key) => newComparableFactKeys.includes(key)).sort();
+        const newKeys = [...classKeys].filter((key) => newComparableFactKeySet.has(key)).sort();
         return { factClass, newComparableFactCount: newKeys.length, newComparableFactKeys: newKeys };
       })
       .filter((item) => item.newComparableFactCount > 0);
@@ -1414,16 +1416,64 @@ export async function writeNormalizedFactsArtifact(
   filePath: string,
   input: NormalizedFactsArtifact | FactNormalizationResult,
 ): Promise<string> {
-  const artifact: NormalizedFactsArtifact = {
-    schemaVersion: FACT_SCHEMA_VERSION,
-    facts: input.facts,
-    unsupported: input.unsupported,
-    correlation: input.correlation,
-    ...(input.comparisons === undefined ? {} : { comparisons: input.comparisons }),
-  };
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeJson(filePath, artifact);
+  const handle = await open(filePath, "w");
+  try {
+    await handle.write(`{"schemaVersion":${FACT_SCHEMA_VERSION},"facts":[`);
+    await writeJsonArray(handle, input.facts, persistFactEnvelope);
+    await handle.write(`],"unsupported":[`);
+    await writeJsonArray(handle, input.unsupported, persistUnsupportedEvidence);
+    await handle.write(`],"correlation":${JSON.stringify(input.correlation)}`);
+    await handle.write("}\n");
+  } finally {
+    await handle.close();
+  }
   return filePath;
+}
+
+/**
+ * The in-memory envelope retains providerNative as a convenience alias, while
+ * the persisted artifact stores the payload once under nativeEvidence and
+ * replaces duplicate aliases with an auditable local reference.
+ */
+function persistFactEnvelope(fact: FactEnvelope): FactEnvelope {
+  const reference = { $ref: `nativeEvidence:${fact.nativeEvidence.id}/providerNative` };
+  return {
+    ...fact,
+    providerNative: reference,
+    nativeEvidence: {
+      ...fact.nativeEvidence,
+      observation: { ...fact.nativeEvidence.observation, providerNative: reference },
+    },
+  };
+}
+
+function persistUnsupportedEvidence(evidence: UnsupportedProviderEvidence): UnsupportedProviderEvidence {
+  const reference = { $ref: `nativeEvidence:${evidence.nativeEvidence.id}/providerNative` };
+  return {
+    ...evidence,
+    providerNative: reference,
+    nativeEvidence: {
+      ...evidence.nativeEvidence,
+      observation: { ...evidence.nativeEvidence.observation, providerNative: reference },
+    },
+  };
+}
+
+async function writeJsonArray<T>(
+  handle: Awaited<ReturnType<typeof open>>,
+  values: readonly T[],
+  transform: (value: T) => unknown,
+): Promise<void> {
+  let buffer = "";
+  for (let index = 0; index < values.length; index += 1) {
+    buffer += (index === 0 ? "" : ",") + JSON.stringify(transform(values[index]));
+    if (buffer.length >= 1024 * 1024) {
+      await handle.write(buffer);
+      buffer = "";
+    }
+  }
+  if (buffer.length > 0) await handle.write(buffer);
 }
 
 /** Reads a persisted #11 normalized-facts artifact without running providers. */
@@ -1454,7 +1504,71 @@ function isProviderMatrix(
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
-  await writeFile(filePath, JSON.stringify(value, null, 2) + "\n", "utf8");
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const handle = await open(filePath, "w");
+  const writer = new JsonArtifactWriter(handle);
+  try {
+    await writer.writeValue(value);
+    await writer.write("\n");
+    await writer.flush();
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Serializes large generated artifacts without first constructing one giant
+ * JSON string. Mottainai's TypeScript observation set is large enough for a
+ * single JSON.stringify(matrix) call to exceed V8's string limit.
+ */
+class JsonArtifactWriter {
+  private buffer = "";
+
+  constructor(private readonly handle: Awaited<ReturnType<typeof open>>) {}
+
+  async write(value: string): Promise<void> {
+    this.buffer += value;
+    if (this.buffer.length >= 1024 * 1024) await this.flush();
+  }
+
+  async flush(): Promise<void> {
+    if (this.buffer.length === 0) return;
+    await this.handle.write(this.buffer);
+    this.buffer = "";
+  }
+
+  async writeValue(value: unknown): Promise<void> {
+    if (value === null) {
+      await this.write("null");
+      return;
+    }
+    if (Array.isArray(value)) {
+      await this.write("[");
+      for (let index = 0; index < value.length; index += 1) {
+        if (index > 0) await this.write(",");
+        await this.writeValue(value[index]);
+      }
+      await this.write("]");
+      return;
+    }
+    if (typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      await this.write("{");
+      let first = true;
+      for (const key of Object.keys(record)) {
+        if (record[key] === undefined) continue;
+        if (!first) await this.write(",");
+        first = false;
+        await this.write(JSON.stringify(key));
+        await this.write(":");
+        await this.writeValue(record[key]);
+      }
+      await this.write("}");
+      return;
+    }
+    const serialized = JSON.stringify(value);
+    await this.write(serialized === undefined ? "null" : serialized);
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

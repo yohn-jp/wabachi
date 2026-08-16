@@ -124,12 +124,29 @@ export interface ProviderCorrelationMetrics {
   readonly unmatched: number;
 }
 
+export interface CorrelationCandidateKeyDiagnostic {
+  readonly keyClass: string;
+  readonly keyCount: number;
+  readonly potentialPairCount: number;
+}
+
+export interface CorrelationDiagnostics {
+  /** Safety bound on candidate materialization; it is not a provider score. */
+  readonly maxCandidatePairsPerKey: number;
+  readonly indexedKeyCount: number;
+  readonly skippedKeyCount: number;
+  /** Potential pairs under skipped keys, before provider/kind filtering. */
+  readonly skippedPotentialPairCount: number;
+  readonly skippedKeys: readonly CorrelationCandidateKeyDiagnostic[];
+}
+
 export interface CorrelationResult {
   readonly canonicalEntities: readonly CanonicalEntity[];
   /** All deterministic candidate links, including links rejected by cardinality. */
   readonly links: readonly CorrelationLink[];
   /** Metrics are keyed by provider id; versions remain in each metric value. */
   readonly metrics: Readonly<Record<string, ProviderCorrelationMetrics>>;
+  readonly diagnostics: CorrelationDiagnostics;
 }
 
 interface NormalizedEntity {
@@ -159,6 +176,18 @@ interface CandidateEdge {
   readonly strength: "matched" | "probable";
   readonly rules: readonly CorrelationRule[];
 }
+
+interface EdgeIndex {
+  readonly incident: ReadonlyMap<number, readonly CandidateEdge[]>;
+  readonly targets: ReadonlyMap<number, ReadonlyMap<string, ReadonlySet<number>>>;
+}
+
+interface CandidateEdgeBuild {
+  readonly edges: readonly CandidateEdge[];
+  readonly diagnostics: CorrelationDiagnostics;
+}
+
+const MAX_CANDIDATE_PAIRS_PER_KEY = 100_000;
 
 interface EntityGroup {
   readonly indices: readonly number[];
@@ -281,7 +310,9 @@ function makeRange(
 /** Correlates provider-native entities using only deterministic local rules. */
 export function correlateProviderEntities(inputs: readonly ProviderEntityInput[]): CorrelationResult {
   const entities = normalizeEntities(inputs);
-  const edges = buildCandidateEdges(entities);
+  const candidateBuild = buildCandidateEdges(entities);
+  const edges = candidateBuild.edges;
+  const edgeIndex = indexEdges(edges, entities);
   const groups = buildGroups(entities, edges);
   const entityGroup = new Map<number, EntityGroup>();
   for (const group of groups) {
@@ -293,20 +324,21 @@ export function correlateProviderEntities(inputs: readonly ProviderEntityInput[]
     canonicalIds.set(group, makeCanonicalId(group, entities));
   }
 
-  const links = edges.map((edge) => toCorrelationLink(edge, entities, edges)).sort(compareLinks);
+  const links = edges.map((edge) => toCorrelationLink(edge, entities, edgeIndex)).sort(compareLinks);
 
   const canonicalEntities = groups
     .map((group) => {
       const canonicalId = canonicalIds.get(group);
       if (canonicalId === undefined) throw new Error("internal correlation group has no identity");
-      return toCanonicalEntity(group, canonicalId, entities, edges, entityGroup, canonicalIds);
+      return toCanonicalEntity(group, canonicalId, entities, edgeIndex, entityGroup, canonicalIds);
     })
     .sort((left, right) => left.canonicalId.localeCompare(right.canonicalId));
 
   return {
     canonicalEntities,
     links,
-    metrics: buildMetrics(entities, edges, groups, entityGroup, canonicalIds),
+    metrics: buildMetrics(entities, edgeIndex, groups, entityGroup, canonicalIds),
+    diagnostics: candidateBuild.diagnostics,
   };
 }
 
@@ -492,15 +524,129 @@ function compareEntities(left: NormalizedEntity, right: NormalizedEntity): numbe
   return stableSerialize(left.input.providerNative).localeCompare(stableSerialize(right.input.providerNative));
 }
 
-function buildCandidateEdges(entities: readonly NormalizedEntity[]): CandidateEdge[] {
-  const edges: CandidateEdge[] = [];
-  for (let left = 0; left < entities.length; left += 1) {
-    for (let right = left + 1; right < entities.length; right += 1) {
-      const edge = compareEntityPair(left, right, entities[left], entities[right]);
-      if (edge !== undefined) edges.push(edge);
+function buildCandidateEdges(entities: readonly NormalizedEntity[]): CandidateEdgeBuild {
+  const buckets = new Map<string, number[]>();
+  for (let index = 0; index < entities.length; index += 1) {
+    for (const key of candidateKeys(entities[index])) {
+      const bucket = buckets.get(key) ?? [];
+      bucket.push(index);
+      buckets.set(key, bucket);
     }
   }
-  return edges.sort(compareEdges);
+
+  const pairKeys = new Set<string>();
+  const skippedByClass = new Map<string, { keyCount: number; potentialPairCount: number }>();
+  let indexedKeyCount = 0;
+  for (const [key, bucket] of buckets.entries()) {
+    const potentialPairCount = (bucket.length * (bucket.length - 1)) / 2;
+    if (potentialPairCount > MAX_CANDIDATE_PAIRS_PER_KEY) {
+      const keyClass = key.split(":", 1)[0] ?? "unknown";
+      const current = skippedByClass.get(keyClass) ?? { keyCount: 0, potentialPairCount: 0 };
+      current.keyCount += 1;
+      current.potentialPairCount += potentialPairCount;
+      skippedByClass.set(keyClass, current);
+      continue;
+    }
+    indexedKeyCount += 1;
+    for (let left = 0; left < bucket.length; left += 1) {
+      for (let right = left + 1; right < bucket.length; right += 1) {
+        const first = bucket[left];
+        const second = bucket[right];
+        const low = Math.min(first, second);
+        const high = Math.max(first, second);
+        pairKeys.add(`${low}\u0000${high}`);
+      }
+    }
+  }
+
+  const edges: CandidateEdge[] = [];
+  for (const pairKey of [...pairKeys].sort()) {
+    const separator = pairKey.indexOf("\u0000");
+    const left = Number(pairKey.slice(0, separator));
+    const right = Number(pairKey.slice(separator + 1));
+    const edge = compareEntityPair(left, right, entities[left], entities[right]);
+    if (edge !== undefined) edges.push(edge);
+  }
+  const skippedKeys = [...skippedByClass.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([keyClass, value]) => ({ keyClass, ...value }));
+  return {
+    edges: edges.sort(compareEdges),
+    diagnostics: {
+      maxCandidatePairsPerKey: MAX_CANDIDATE_PAIRS_PER_KEY,
+      indexedKeyCount,
+      skippedKeyCount: skippedKeys.reduce((count, item) => count + item.keyCount, 0),
+      skippedPotentialPairCount: skippedKeys.reduce((count, item) => count + item.potentialPairCount, 0),
+      skippedKeys,
+    },
+  };
+}
+
+/**
+ * Candidate generation is indexed by every rule that can make
+ * `compareEntityPair` return a score. The final pair comparison remains the
+ * authority, so these keys only avoid evaluating impossible pairs.
+ */
+function candidateKeys(entity: NormalizedEntity): string[] {
+  const keys = new Set<string>();
+  if (entity.path !== undefined && entity.range !== undefined) {
+    keys.add(`path-range:${entity.path}:${stableSerialize(entity.range)}`);
+  }
+  if (entity.path !== undefined && entity.signatureKey !== undefined) {
+    keys.add(`path-signature:${entity.path}:${entity.signatureKey}`);
+  }
+  if (entity.signatureKey !== undefined) keys.add(`signature:${entity.signatureKey}`);
+  if (entity.qualifiedName !== undefined) {
+    keys.add(`qualified-exact:${entity.qualifiedName}`);
+    keys.add(`alias-match-exact:${entity.qualifiedName}`);
+  }
+  for (const alias of entity.aliases) keys.add(`alias-match-exact:${alias}`);
+  // A bare token such as "type" or "0" is not a useful cross-file
+  // candidate key. Exact names remain useful when the source path also
+  // agrees, while the final pair comparison still computes all rules.
+  if (entity.path !== undefined && entity.name !== undefined) {
+    keys.add(`path-name-exact:${entity.path}:${entity.name}`);
+  }
+  if (
+    entity.path !== undefined &&
+    entity.name === undefined &&
+    entity.qualifiedName === undefined &&
+    entity.aliases.length === 0
+  ) {
+    keys.add(`path-kind:${entity.path}:${entity.kindFamily}`);
+  }
+  return [...keys].sort();
+}
+
+function indexEdges(edges: readonly CandidateEdge[], entities: readonly NormalizedEntity[]): EdgeIndex {
+  const incident = new Map<number, CandidateEdge[]>();
+  const targets = new Map<number, Map<string, Set<number>>>();
+  const addIncident = (index: number, edge: CandidateEdge): void => {
+    const values = incident.get(index) ?? [];
+    values.push(edge);
+    incident.set(index, values);
+  };
+  const addTarget = (index: number, provider: string, target: number): void => {
+    const byProvider = targets.get(index) ?? new Map<string, Set<number>>();
+    const values = byProvider.get(provider) ?? new Set<number>();
+    values.add(target);
+    byProvider.set(provider, values);
+    targets.set(index, byProvider);
+  };
+  for (const edge of edges) {
+    addIncident(edge.left, edge);
+    addIncident(edge.right, edge);
+    addTarget(edge.left, entities[edge.right].providerKey, edge.right);
+    addTarget(edge.right, entities[edge.left].providerKey, edge.left);
+  }
+  for (const values of incident.values()) values.sort(compareEdges);
+  return { incident, targets };
+}
+
+function uniqueEdges(edges: readonly CandidateEdge[]): CandidateEdge[] {
+  const byKey = new Map<string, CandidateEdge>();
+  for (const edge of edges) byKey.set(`${edge.left}\u0000${edge.right}`, edge);
+  return [...byKey.values()].sort(compareEdges);
 }
 
 function compareEntityPair(
@@ -643,12 +789,12 @@ function toCanonicalEntity(
   group: EntityGroup,
   canonicalId: string,
   entities: readonly NormalizedEntity[],
-  edges: readonly CandidateEdge[],
+  edgeIndex: EdgeIndex,
   entityGroup: ReadonlyMap<number, EntityGroup>,
   canonicalIds: ReadonlyMap<EntityGroup, string>,
 ): CanonicalEntity {
   const members = group.indices.map((index) => toCanonicalMember(entities[index])).sort(compareMembers);
-  const incidentEdges = edges.filter((edge) => group.indices.includes(edge.left) || group.indices.includes(edge.right));
+  const incidentEdges = uniqueEdges(group.indices.flatMap((index) => edgeIndex.incident.get(index) ?? []));
   const internalEdges = incidentEdges.filter(
     (edge) => group.indices.includes(edge.left) && group.indices.includes(edge.right),
   );
@@ -670,7 +816,7 @@ function toCanonicalEntity(
       : incidentEdges.length > 0
         ? "ambiguous"
         : "unmatched";
-  const cardinality = groupCardinality(group, edges, entities);
+  const cardinality = groupCardinality(group, incidentEdges, edgeIndex, entities);
   const reason: CorrelationRationale["reason"] =
     status === "unmatched"
       ? "no-cross-provider-evidence"
@@ -732,14 +878,14 @@ function toEvidence(edge: CandidateEdge, entities: readonly NormalizedEntity[]):
 function toCorrelationLink(
   edge: CandidateEdge,
   entities: readonly NormalizedEntity[],
-  allEdges: readonly CandidateEdge[],
+  edgeIndex: EdgeIndex,
 ): CorrelationLink {
   return {
     left: toReference(entities[edge.left]),
     right: toReference(entities[edge.right]),
     score: edge.score,
     strength: edge.strength,
-    cardinality: edgeCardinality(edge, allEdges, entities),
+    cardinality: edgeCardinality(edge, edgeIndex, entities),
     rules: edge.rules,
   };
 }
@@ -756,25 +902,11 @@ function toReference(entity: NormalizedEntity): ProviderEntityReference {
 
 function edgeCardinality(
   edge: CandidateEdge,
-  allEdges: readonly CandidateEdge[],
+  edgeIndex: EdgeIndex,
   entities: readonly NormalizedEntity[],
 ): CorrelationCardinality {
-  const leftTargets = new Set(
-    allEdges
-      .filter(
-        (candidate) =>
-          candidate.left === edge.left && entities[candidate.right].providerKey === entities[edge.right].providerKey,
-      )
-      .map((candidate) => candidate.right),
-  );
-  const rightTargets = new Set(
-    allEdges
-      .filter(
-        (candidate) =>
-          candidate.right === edge.right && entities[candidate.left].providerKey === entities[edge.left].providerKey,
-      )
-      .map((candidate) => candidate.left),
-  );
+  const leftTargets = edgeIndex.targets.get(edge.left)?.get(entities[edge.right].providerKey) ?? new Set<number>();
+  const rightTargets = edgeIndex.targets.get(edge.right)?.get(entities[edge.left].providerKey) ?? new Set<number>();
   if (leftTargets.size > 1 && rightTargets.size > 1) return "many-to-many";
   if (leftTargets.size > 1) return "one-to-many";
   if (rightTargets.size > 1) return "many-to-one";
@@ -784,6 +916,7 @@ function edgeCardinality(
 function groupCardinality(
   group: EntityGroup,
   incidentEdges: readonly CandidateEdge[],
+  edgeIndex: EdgeIndex,
   entities: readonly NormalizedEntity[],
 ): CorrelationCardinality {
   if (incidentEdges.length === 0) return "unmatched";
@@ -791,7 +924,7 @@ function groupCardinality(
   let manyToOne = false;
   let manyToMany = false;
   for (const edge of incidentEdges) {
-    const cardinality = edgeCardinality(edge, incidentEdges, entities);
+    const cardinality = edgeCardinality(edge, edgeIndex, entities);
     if (cardinality === "many-to-many") manyToMany = true;
     if (cardinality === "one-to-many") {
       if (group.indices.includes(edge.left)) oneToMany = true;
@@ -810,7 +943,7 @@ function groupCardinality(
 
 function buildMetrics(
   entities: readonly NormalizedEntity[],
-  edges: readonly CandidateEdge[],
+  edgeIndex: EdgeIndex,
   groups: readonly EntityGroup[],
   entityGroup: ReadonlyMap<number, EntityGroup>,
   canonicalIds: ReadonlyMap<EntityGroup, string>,
@@ -842,7 +975,7 @@ function buildMetrics(
         const canonicalId = canonicalIds.get(group);
         if (canonicalId !== undefined) canonicalEntityIds.add(canonicalId);
       }
-      const incident = edges.filter((edge) => edge.left === index || edge.right === index);
+      const incident = edgeIndex.incident.get(index) ?? [];
       candidateCount += incident.length;
       const status: CorrelationStatus =
         group === undefined

@@ -103,6 +103,8 @@ export interface FactComparison {
 export interface FactNormalizationOptions {
   /** Provider identities expected in the comparison; used to distinguish provider-only from equivalent. */
   readonly providers?: readonly ProviderIdentity[];
+  /** Skip the legacy comparison projection when only the matrix is required. */
+  readonly includeComparisons?: boolean;
 }
 
 export interface FactNormalizationResult {
@@ -156,14 +158,16 @@ export function normalizeFacts(
   const runtimeObservations = observations as readonly Observation[];
   const preferredEntities = providerEntitiesFromObservations(runtimeObservations);
   const allEntities = providerEntitiesFromAllObservations(runtimeObservations);
-  const selectedEntities = selectEntityInputs(preferredEntities, allEntities);
+  const preferredByNative = groupByNative(preferredEntities);
+  const allByNative = groupByNative(allEntities);
+  const selectedEntities = selectEntityInputs(preferredByNative, allByNative);
   const correlation = correlateProviderEntities(selectedEntities);
   const assignments = indexAssignments(correlation);
 
   const facts: FactEnvelope[] = [];
   const unsupported: UnsupportedProviderEvidence[] = [];
   for (const observation of observations) {
-    const endpointInputs = endpointInputsForObservation(observation, preferredEntities, allEntities);
+    const endpointInputs = endpointInputsForObservation(observation, preferredByNative, allByNative);
     const subjectInput = endpointInputs.find((input) => input.id === observation.subject.id);
     const subject = toFactEntityReference(
       subjectInput ?? fallbackEntityInput(observation, observation.subject),
@@ -188,14 +192,18 @@ export function normalizeFacts(
     }
   }
 
-  facts.sort(compareFactsForOutput);
+  const sortedFacts = sortFactsForOutput(facts);
+  facts.length = 0;
+  for (const fact of sortedFacts) facts.push(fact);
   unsupported.sort(compareUnsupportedForOutput);
+  const comparisons =
+    options.includeComparisons === false ? [] : compareFactSets(facts, { providers: options.providers, unsupported });
   return {
     schemaVersion: FACT_SCHEMA_VERSION,
     facts,
     unsupported,
     correlation,
-    comparisons: compareFactSets(facts, { providers: options.providers, unsupported }),
+    comparisons,
   };
 }
 
@@ -253,7 +261,7 @@ export function areEquivalentFacts(left: FactEnvelope, right: FactEnvelope): boo
  * are a conflict rather than a winner-takes-all merge.
  */
 export function compareFacts(facts: readonly FactEnvelope[], options: ComparisonOptions = {}): FactComparison {
-  const orderedFacts = [...facts].sort(compareFactsForOutput);
+  const orderedFacts = sortFactsForOutput(facts);
   const unsupported = [...(options.unsupported ?? [])].sort(compareUnsupportedForOutput);
   const keys = [...new Set(orderedFacts.map(factEqualityKey))].sort();
   const providerMap = new Map<string, ProviderIdentity>();
@@ -444,27 +452,33 @@ function normalizedSource(source: SourceEvidence): SourceEvidence {
 }
 
 function selectEntityInputs(
-  preferred: readonly ProviderEntityInput[],
-  all: readonly ProviderEntityInput[],
+  preferredByNative: ReadonlyMap<string, readonly ProviderEntityInput[]>,
+  allByNative: ReadonlyMap<string, readonly ProviderEntityInput[]>,
 ): ProviderEntityInput[] {
-  const preferredByNative = groupByNative(preferred);
-  const selected = [...preferred];
-  for (const input of all) {
-    const candidates = preferredByNative.get(providerNativeKey(input)) ?? [];
-    if (candidates.length === 1) continue;
-    selected.push(input);
+  const selected = [...preferredByNative.values()].flat();
+  for (const [nativeKey, candidates] of allByNative) {
+    // Definitions are the correlation authority when a provider emits them.
+    // Relation occurrences still remain in nativeEvidence and are resolved
+    // against this smaller index while normalizing each fact. Keeping every
+    // occurrence here turns large repositories into an O(n²) ambiguity graph.
+    if ((preferredByNative.get(nativeKey) ?? []).length > 0) continue;
+    const representative = [...candidates].sort((left, right) => {
+      const fingerprint = entityFingerprint(left).localeCompare(entityFingerprint(right));
+      return fingerprint !== 0
+        ? fingerprint
+        : stableSerialize(left.providerNative).localeCompare(stableSerialize(right.providerNative));
+    })[0];
+    if (representative !== undefined) selected.push(representative);
   }
   return deduplicateEntityInputs(selected);
 }
 
 function endpointInputsForObservation(
   observation: FactObservation,
-  preferred: readonly ProviderEntityInput[],
-  all: readonly ProviderEntityInput[],
+  preferredByNative: ReadonlyMap<string, readonly ProviderEntityInput[]>,
+  allByNative: ReadonlyMap<string, readonly ProviderEntityInput[]>,
 ): ProviderEntityInput[] {
   const endpointInputs = providerEntitiesFromAllObservations([observation as Observation]);
-  const preferredByNative = groupByNative(preferred);
-  const allByNative = groupByNative(all);
   return endpointInputs.map((input) => {
     const preferredCandidates = preferredByNative.get(providerNativeKey(input)) ?? [];
     if (preferredCandidates.length === 1) return preferredCandidates[0];
@@ -535,7 +549,10 @@ function addAssignment(map: Map<string, EntityAssignment[]>, key: string, assign
 function toFactEntityReference(input: ProviderEntityInput, assignments: EntityAssignments): FactEntityReference {
   const exact = assignments.byFingerprint.get(entityFingerprint(input)) ?? [];
   const native = assignments.byNative.get(providerNativeKey(input)) ?? [];
-  const candidates = uniqueAssignments(exact.length > 0 ? exact : native);
+  // `indexAssignments` already deduplicates each native/fingerprint bucket by
+  // canonical entity. Rebuilding a Map for every high-volume occurrence made
+  // ambiguous native IDs dominate large-repository normalization.
+  const candidates = exact.length > 0 ? exact : native;
   const only = candidates.length === 1 ? candidates[0] : undefined;
   const correlationStatus: CorrelationStatus =
     candidates.length > 1 ? "ambiguous" : (only?.entity.status ?? "unmatched");
@@ -557,12 +574,6 @@ function toFactEntityReference(input: ProviderEntityInput, assignments: EntityAs
       : { path: normalizeRepositoryPath(input.path ?? input.source?.path ?? ".") }),
     ...(normalizeInputRange(input) === undefined ? {} : { range: normalizeInputRange(input) }),
   };
-}
-
-function uniqueAssignments(assignments: readonly EntityAssignment[]): EntityAssignment[] {
-  const byId = new Map<string, EntityAssignment>();
-  for (const assignment of assignments) byId.set(assignment.entity.canonicalId, assignment);
-  return [...byId.values()].sort((left, right) => left.entity.canonicalId.localeCompare(right.entity.canonicalId));
 }
 
 function entityFingerprint(input: ProviderEntityInput): string {
@@ -628,10 +639,19 @@ function isObservationEntity(value: Observation["object"]): value is Observation
   return record !== undefined && typeof record.id === "string" && typeof record.kind === "string";
 }
 
-function compareFactsForOutput(left: FactEnvelope, right: FactEnvelope): number {
-  const keyCompare = factEqualityKey(left).localeCompare(factEqualityKey(right));
-  if (keyCompare !== 0) return keyCompare;
-  return left.factId.localeCompare(right.factId);
+function sortFactsForOutput(values: readonly FactEnvelope[]): FactEnvelope[] {
+  const equalityKeys = new WeakMap<FactEnvelope, string>();
+  const keyFor = (fact: FactEnvelope): string => {
+    const cached = equalityKeys.get(fact);
+    if (cached !== undefined) return cached;
+    const key = factEqualityKey(fact);
+    equalityKeys.set(fact, key);
+    return key;
+  };
+  return [...values].sort((left, right) => {
+    const keyCompare = keyFor(left).localeCompare(keyFor(right));
+    return keyCompare !== 0 ? keyCompare : left.factId.localeCompare(right.factId);
+  });
 }
 
 function compareUnsupportedForOutput(left: UnsupportedProviderEvidence, right: UnsupportedProviderEvidence): number {

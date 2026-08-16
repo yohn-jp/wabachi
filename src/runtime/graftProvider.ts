@@ -90,6 +90,7 @@ export function createGraftProvider(options: GraftProviderOptions = {}): Provide
       return {
         status: "ok",
         artifacts: [invocationRelativePath, wiringRelativePath, observationsRelativePath],
+        observationArtifacts: [observationsRelativePath],
         startedAt,
         finishedAt: new Date().toISOString(),
       };
