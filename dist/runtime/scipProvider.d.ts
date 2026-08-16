@@ -1,4 +1,4 @@
-import type { Observation } from "./observation.js";
+import { type Observation } from "./observation.js";
 import type { Provider } from "./provider.js";
 export type ScipObservation = Observation;
 /**

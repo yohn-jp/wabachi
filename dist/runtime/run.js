@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { writeManifest } from "./manifest.js";
+import { collectToolchainVersions, writeManifest } from "./manifest.js";
 import { createIsolatedWorkspace, resolveRepository } from "./repository.js";
 /**
  * Resolves the input repository to an immutable commit, materializes it
@@ -13,9 +13,10 @@ import { createIsolatedWorkspace, resolveRepository } from "./repository.js";
 export async function run(options) {
     const startedAt = new Date().toISOString();
     const runId = randomUUID();
-    const bareRepoDir = path.join(options.runRoot, "source");
-    const workspaceRoot = path.join(options.runRoot, "workspace");
-    const artifactsRoot = path.join(options.runRoot, "raw");
+    const runRoot = path.resolve(options.runRoot);
+    const bareRepoDir = path.join(runRoot, "source");
+    const workspaceRoot = path.join(runRoot, "workspace");
+    const artifactsRoot = path.join(runRoot, "raw");
     const resolution = await resolveRepository(options.source, options.revision, bareRepoDir);
     await createIsolatedWorkspace(resolution, workspaceRoot);
     const providerEntries = [];
@@ -36,9 +37,10 @@ export async function run(options) {
         repository: resolution.resolved,
         startedAt,
         finishedAt,
+        toolchain: await collectToolchainVersions(),
         providers: providerEntries,
     };
-    const manifestPath = await writeManifest(options.runRoot, manifest);
+    const manifestPath = await writeManifest(runRoot, manifest);
     return { manifest, manifestPath };
 }
 async function executeProvider(provider, context) {

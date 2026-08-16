@@ -649,8 +649,13 @@ function sortFactsForOutput(values: readonly FactEnvelope[]): FactEnvelope[] {
     return key;
   };
   return [...values].sort((left, right) => {
-    const keyCompare = keyFor(left).localeCompare(keyFor(right));
-    return keyCompare !== 0 ? keyCompare : left.factId.localeCompare(right.factId);
+    const leftKey = keyFor(left);
+    const rightKey = keyFor(right);
+    if (leftKey < rightKey) return -1;
+    if (leftKey > rightKey) return 1;
+    if (left.factId < right.factId) return -1;
+    if (left.factId > right.factId) return 1;
+    return 0;
   });
 }
 

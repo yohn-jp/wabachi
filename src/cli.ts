@@ -73,7 +73,7 @@ async function runMatrixCommand(args: string[]): Promise<number> {
     if (configuredProviderIds !== undefined && !sameStrings(configuredProviderIds, providerIds)) {
       throw new Error(`workflow config provider set does not match registered providers: ${providerIds.join(", ")}`);
     }
-    const additionOrder =
+    const configuredOrder =
       configuredAdditionOrder === undefined
         ? undefined
         : configuredAdditionOrder.map((id) => {
@@ -81,7 +81,7 @@ async function runMatrixCommand(args: string[]): Promise<number> {
             if (provider === undefined) throw new Error(`workflow config names an unknown provider: ${id}`);
             return provider.identity;
           });
-    const result = await runProviderMatrix({ source, revision, runRoot, providers, additionOrder });
+    const result = await runProviderMatrix({ source, revision, runRoot, providers, additionOrder: configuredOrder });
     console.log(result.matrixPaths.reportPath);
     return 0;
   } catch (error) {

@@ -537,6 +537,8 @@ function buildCandidateEdges(entities: readonly NormalizedEntity[]): CandidateEd
   const pairKeys = new Set<string>();
   const skippedByClass = new Map<string, { keyCount: number; potentialPairCount: number }>();
   let indexedKeyCount = 0;
+  let globalPairCount = 0;
+  let globalCapExceeded = false;
   for (const [key, bucket] of buckets.entries()) {
     const potentialPairCount = (bucket.length * (bucket.length - 1)) / 2;
     if (potentialPairCount > MAX_CANDIDATE_PAIRS_PER_KEY) {
@@ -550,17 +552,31 @@ function buildCandidateEdges(entities: readonly NormalizedEntity[]): CandidateEd
     indexedKeyCount += 1;
     for (let left = 0; left < bucket.length; left += 1) {
       for (let right = left + 1; right < bucket.length; right += 1) {
+        if (globalCapExceeded) continue;
         const first = bucket[left];
         const second = bucket[right];
         const low = Math.min(first, second);
         const high = Math.max(first, second);
-        pairKeys.add(`${low}\u0000${high}`);
+        const pairKey = `${low}\u0000${high}`;
+        if (!pairKeys.has(pairKey)) {
+          if (globalPairCount >= MAX_CANDIDATE_PAIRS_PER_KEY) {
+            globalCapExceeded = true;
+            const keyClass = key.split(":", 1)[0] ?? "unknown";
+            const current = skippedByClass.get(keyClass) ?? { keyCount: 0, potentialPairCount: 0 };
+            current.keyCount += 1;
+            current.potentialPairCount += potentialPairCount;
+            skippedByClass.set(keyClass, current);
+            continue;
+          }
+          pairKeys.add(pairKey);
+          globalPairCount += 1;
+        }
       }
     }
   }
 
   const edges: CandidateEdge[] = [];
-  for (const pairKey of [...pairKeys].sort()) {
+  for (const pairKey of pairKeys) {
     const separator = pairKey.indexOf("\u0000");
     const left = Number(pairKey.slice(0, separator));
     const right = Number(pairKey.slice(separator + 1));
@@ -568,7 +584,7 @@ function buildCandidateEdges(entities: readonly NormalizedEntity[]): CandidateEd
     if (edge !== undefined) edges.push(edge);
   }
   const skippedKeys = [...skippedByClass.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([keyClass, value]) => ({ keyClass, ...value }));
   return {
     edges: edges.sort(compareEdges),
@@ -600,7 +616,18 @@ function candidateKeys(entity: NormalizedEntity): string[] {
     keys.add(`qualified-exact:${entity.qualifiedName}`);
     keys.add(`alias-match-exact:${entity.qualifiedName}`);
   }
+  for (const qualifiedKey of entity.qualifiedKeys) {
+    keys.add(`qualified-normalized:${qualifiedKey}`);
+  }
   for (const alias of entity.aliases) keys.add(`alias-match-exact:${alias}`);
+  for (const aliasKey of entity.aliasKeys) {
+    keys.add(`alias-normalized:${aliasKey}`);
+  }
+  for (const nameKey of entity.nameKeys) {
+    if (entity.path !== undefined) {
+      keys.add(`path-name-normalized:${entity.path}:${nameKey}`);
+    }
+  }
   // A bare token such as "type" or "0" is not a useful cross-file
   // candidate key. Exact names remain useful when the source path also
   // agrees, while the final pair comparison still computes all rules.
@@ -794,14 +821,15 @@ function toCanonicalEntity(
   canonicalIds: ReadonlyMap<EntityGroup, string>,
 ): CanonicalEntity {
   const members = group.indices.map((index) => toCanonicalMember(entities[index])).sort(compareMembers);
+  const groupIndices = new Set(group.indices);
   const incidentEdges = uniqueEdges(group.indices.flatMap((index) => edgeIndex.incident.get(index) ?? []));
   const internalEdges = incidentEdges.filter(
-    (edge) => group.indices.includes(edge.left) && group.indices.includes(edge.right),
+    (edge) => groupIndices.has(edge.left) && groupIndices.has(edge.right),
   );
   const candidateCanonicalIds = uniqueSorted(
     incidentEdges
       .flatMap((edge) => {
-        const other = group.indices.includes(edge.left) ? edge.right : edge.left;
+        const other = groupIndices.has(edge.left) ? edge.right : edge.left;
         const otherGroup = entityGroup.get(other);
         const otherId = otherGroup === undefined ? undefined : canonicalIds.get(otherGroup);
         return otherId === undefined || otherId === canonicalId ? [] : [otherId];
@@ -816,7 +844,7 @@ function toCanonicalEntity(
       : incidentEdges.length > 0
         ? "ambiguous"
         : "unmatched";
-  const cardinality = groupCardinality(group, incidentEdges, edgeIndex, entities);
+  const cardinality = groupCardinality(group, incidentEdges, edgeIndex, entities, groupIndices);
   const reason: CorrelationRationale["reason"] =
     status === "unmatched"
       ? "no-cross-provider-evidence"
@@ -918,6 +946,7 @@ function groupCardinality(
   incidentEdges: readonly CandidateEdge[],
   edgeIndex: EdgeIndex,
   entities: readonly NormalizedEntity[],
+  groupIndices: ReadonlySet<number>,
 ): CorrelationCardinality {
   if (incidentEdges.length === 0) return "unmatched";
   let oneToMany = false;
@@ -927,12 +956,12 @@ function groupCardinality(
     const cardinality = edgeCardinality(edge, edgeIndex, entities);
     if (cardinality === "many-to-many") manyToMany = true;
     if (cardinality === "one-to-many") {
-      if (group.indices.includes(edge.left)) oneToMany = true;
-      if (group.indices.includes(edge.right)) manyToOne = true;
+      if (groupIndices.has(edge.left)) oneToMany = true;
+      if (groupIndices.has(edge.right)) manyToOne = true;
     }
     if (cardinality === "many-to-one") {
-      if (group.indices.includes(edge.left)) oneToMany = true;
-      if (group.indices.includes(edge.right)) manyToOne = true;
+      if (groupIndices.has(edge.left)) oneToMany = true;
+      if (groupIndices.has(edge.right)) manyToOne = true;
     }
   }
   if (manyToMany || (oneToMany && manyToOne)) return "many-to-many";

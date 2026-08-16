@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import ts from "typescript";
+import { OBSERVATION_SCHEMA_VERSION, } from "./observation.js";
 /**
  * Compiler-authoritative semantic evidence provider (Issue #7). Discovers
  * the workspace's TypeScript project configuration, builds a Program using
@@ -65,6 +66,7 @@ export function createTypeScriptProvider() {
             return {
                 status: "ok",
                 artifacts: [metaRelativePath, diagnosticsRelativePath, observationsRelativePath, ...nativeArtifacts],
+                observationArtifacts: [observationsRelativePath],
                 startedAt,
                 finishedAt: new Date().toISOString(),
             };
@@ -174,6 +176,7 @@ class ObservationCollector {
     }
     push(predicate, subject, object, source, native) {
         this.observations.push({
+            schemaVersion: OBSERVATION_SCHEMA_VERSION,
             subject,
             predicate,
             object,

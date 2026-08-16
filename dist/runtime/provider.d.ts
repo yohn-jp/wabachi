@@ -15,6 +15,10 @@ export interface ProviderExecutionResult {
     readonly status: "ok" | "failed" | "unavailable";
     /** Paths (relative to artifactRoot) to raw artifacts this provider produced, if any. */
     readonly artifacts: readonly string[];
+    /** Observation-envelope artifacts consumed by the common normalization workflow. */
+    readonly observationArtifacts?: readonly string[];
+    /** Lossless retained paths after the workflow compresses raw artifacts for audit storage. */
+    readonly retainedArtifacts?: readonly string[];
     readonly startedAt: string;
     readonly finishedAt: string;
     readonly error?: string;

@@ -842,7 +842,7 @@ function indexComparableFactSets(
   entries: readonly ProviderIdentityEntry[],
   factClasses: readonly string[],
 ): ReadonlyMap<string, ComparableFactSets> {
-  const index = new Map<string, ComparableFactSets>();
+  const index = new Map<string, { byLogical: Map<string, Set<string>> }>();
   for (const entry of entries) {
     for (const factClass of factClasses) {
       index.set(indexKey(entry.key, factClass), { byLogical: new Map() });
@@ -853,15 +853,15 @@ function indexComparableFactSets(
     const key = indexKey(descriptor.providerKey, descriptor.factClass);
     const entry = index.get(key);
     if (entry === undefined) continue;
-    const values = (entry.byLogical as Map<string, Set<string>>).get(descriptor.logicalKey) ?? new Set<string>();
+    const values = entry.byLogical.get(descriptor.logicalKey) ?? new Set<string>();
     values.add(descriptor.exactKey);
-    (entry.byLogical as Map<string, Set<string>>).set(descriptor.logicalKey, values);
+    entry.byLogical.set(descriptor.logicalKey, values);
   }
   return index;
 }
 
 function indexKey(providerKeyValue: string, factClass: string): string {
-  return providerKeyValue + " " + factClass;
+  return `${providerKeyValue}\u0000${factClass}`;
 }
 
 function buildPairwiseOverlap(
@@ -941,13 +941,16 @@ function buildInformationGain(
     const exactKeysForProvider = [...new Set(providerFacts.map((descriptor) => descriptor.exactKey))].sort();
     const newComparableFactKeys = exactKeysForProvider.filter((key) => !baseline.has(key));
     const newComparableFactKeySet = new Set(newComparableFactKeys);
+    const factsByClass = new Map<string, FactDescriptor[]>();
+    for (const descriptor of providerFacts) {
+      const group = factsByClass.get(descriptor.factClass) ?? [];
+      group.push(descriptor);
+      factsByClass.set(descriptor.factClass, group);
+    }
     const classCounts = factClasses
       .map((factClass) => {
-        const classKeys = new Set(
-          providerFacts
-            .filter((descriptor) => descriptor.factClass === factClass)
-            .map((descriptor) => descriptor.exactKey),
-        );
+        const classFacts = factsByClass.get(factClass) ?? [];
+        const classKeys = new Set(classFacts.map((descriptor) => descriptor.exactKey));
         const newKeys = [...classKeys].filter((key) => newComparableFactKeySet.has(key)).sort();
         return { factClass, newComparableFactCount: newKeys.length, newComparableFactKeys: newKeys };
       })
@@ -1441,13 +1444,17 @@ export async function writeNormalizedFactsArtifact(
 ): Promise<string> {
   await mkdir(path.dirname(filePath), { recursive: true });
   const handle = await open(filePath, "w");
+  const writer = new JsonArtifactWriter(handle);
   try {
-    await handle.write(`{"schemaVersion":${FACT_SCHEMA_VERSION},"facts":[`);
-    await writeJsonArray(handle, input.facts, persistFactEnvelope);
-    await handle.write(`],"unsupported":[`);
-    await writeJsonArray(handle, input.unsupported, persistUnsupportedEvidence);
-    await handle.write(`],"correlation":${JSON.stringify(input.correlation)}`);
-    await handle.write("}\n");
+    const artifact = {
+      schemaVersion: FACT_SCHEMA_VERSION,
+      facts: input.facts.map(persistFactEnvelope),
+      unsupported: input.unsupported.map(persistUnsupportedEvidence),
+      correlation: input.correlation,
+    };
+    await writer.writeValue(artifact);
+    await writer.write("\n");
+    await writer.flush();
   } finally {
     await handle.close();
   }
@@ -1466,6 +1473,7 @@ function persistFactEnvelope(fact: FactEnvelope): FactEnvelope {
     providerNative: reference,
     nativeEvidence: {
       ...fact.nativeEvidence,
+      providerNative: fact.nativeEvidence.providerNative,
       observation: { ...fact.nativeEvidence.observation, providerNative: reference },
     },
   };
@@ -1478,26 +1486,13 @@ function persistUnsupportedEvidence(evidence: UnsupportedProviderEvidence): Unsu
     providerNative: reference,
     nativeEvidence: {
       ...evidence.nativeEvidence,
+      providerNative: evidence.nativeEvidence.providerNative,
       observation: { ...evidence.nativeEvidence.observation, providerNative: reference },
     },
   };
 }
 
-async function writeJsonArray<T>(
-  handle: Awaited<ReturnType<typeof open>>,
-  values: readonly T[],
-  transform: (value: T) => unknown,
-): Promise<void> {
-  let buffer = "";
-  for (let index = 0; index < values.length; index += 1) {
-    buffer += (index === 0 ? "" : ",") + JSON.stringify(transform(values[index]));
-    if (buffer.length >= 1024 * 1024) {
-      await handle.write(buffer);
-      buffer = "";
-    }
-  }
-  if (buffer.length > 0) await handle.write(buffer);
-}
+
 
 /** Reads a persisted #11 normalized-facts artifact without running providers. */
 export async function readNormalizedFactsArtifact(filePath: string): Promise<NormalizedFactsArtifact> {

@@ -54,8 +54,8 @@ export interface MatrixWorkflowResult extends RunResult {
 export async function runProviderMatrix(options: MatrixWorkflowOptions): Promise<MatrixWorkflowResult> {
   assertCommitSha(options.revision);
   const runRoot = path.resolve(options.runRoot);
-  const providerIdentities = options.providers.map((provider) => provider.identity);
-  const additionOrder = options.additionOrder ?? providerIdentities;
+  const configuredProviderIdentities = options.providers.map((provider) => provider.identity);
+  const configuredAdditionOrder = options.additionOrder ?? configuredProviderIdentities;
   await mkdir(runRoot, { recursive: true });
   await writeJson(path.join(runRoot, "config.json"), {
     schemaVersion: MATRIX_WORKFLOW_SCHEMA_VERSION,
@@ -63,8 +63,8 @@ export async function runProviderMatrix(options: MatrixWorkflowOptions): Promise
     source: options.source,
     revision: options.revision.toLowerCase(),
     nodeOptions: process.env.NODE_OPTIONS ?? "default",
-    providers: providerIdentities.map((provider) => provider.id),
-    additionOrder: additionOrder.map((provider) => provider.id),
+    providers: configuredProviderIdentities.map((provider) => provider.id),
+    additionOrder: configuredAdditionOrder.map((provider) => provider.id),
   });
 
   const runResult = await run({
@@ -103,9 +103,15 @@ export async function runProviderMatrix(options: MatrixWorkflowOptions): Promise
     correlation: normalized.correlation,
   });
 
+  const manifestIdentityById = new Map(
+    runResult.manifest.providers.map((entry) => [entry.identity.id, entry.identity]),
+  );
+  const mappedAdditionOrder = configuredAdditionOrder
+    .map((configured) => manifestIdentityById.get(configured.id))
+    .filter((identity): identity is ProviderIdentity => identity !== undefined);
   const matrix = buildProviderMatrix(normalized, {
     providers: runResult.manifest.providers.map((entry) => entry.identity),
-    additionOrder,
+    additionOrder: mappedAdditionOrder.length > 0 ? mappedAdditionOrder : undefined,
   });
   const matrixPaths = await writeProviderMatrixArtifacts(runRoot, matrix);
   const retainedManifest = await retainRawProviderArtifacts(runRoot, runResult.manifest);

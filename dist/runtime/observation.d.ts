@@ -1,4 +1,7 @@
 import type { DeterminismClass, ProviderIdentity, ResolvedRepository } from "./provider.js";
+/** Version of the provider observation interchange envelope. */
+export declare const OBSERVATION_SCHEMA_VERSION: 1;
+export type ObservationSchemaVersion = typeof OBSERVATION_SCHEMA_VERSION;
 /**
  * Minimal common interchange envelope for comparing provider evidence
  * (Wabachi Issue #5). This is intentionally not the final semantic fact
@@ -17,6 +20,8 @@ export interface SourceEvidence {
     readonly span?: string;
 }
 export interface Observation {
+    /** Optional for backwards-compatible in-memory callers; providers must emit it. */
+    readonly schemaVersion?: ObservationSchemaVersion;
     readonly subject: ObservationEntity;
     readonly predicate: ObservationPredicate;
     readonly object: ObservationEntity | {

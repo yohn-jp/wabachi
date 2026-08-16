@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { OBSERVATION_SCHEMA_VERSION } from "./observation.js";
 const execFileAsync = promisify(execFile);
 /**
  * Deterministic structural relations `graft build` (without `--deep`) can
@@ -57,6 +58,7 @@ export function createGraftProvider(options = {}) {
             return {
                 status: "ok",
                 artifacts: [invocationRelativePath, wiringRelativePath, observationsRelativePath],
+                observationArtifacts: [observationsRelativePath],
                 startedAt,
                 finishedAt: new Date().toISOString(),
             };
@@ -91,6 +93,7 @@ function adaptWiringGraph(wiring, provider, context) {
 }
 function toObservation(edge, sourceNode, targetNode, predicate, provider, context) {
     return {
+        schemaVersion: OBSERVATION_SCHEMA_VERSION,
         subject: { id: sourceNode.id, kind: sourceNode.kind },
         predicate,
         object: { id: targetNode.id, kind: targetNode.kind },
@@ -98,7 +101,7 @@ function toObservation(edge, sourceNode, targetNode, predicate, provider, contex
         repository: context.repository,
         source: { path: sourceNode.path, span: sourceNode.span ?? undefined },
         determinism: "deterministic",
-        providerNative: { node: sourceNode, edge },
+        providerNative: { node: sourceNode, sourceNode, targetNode, edge },
     };
 }
 //# sourceMappingURL=graftProvider.js.map
