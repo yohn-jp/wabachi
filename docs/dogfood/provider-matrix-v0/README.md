@@ -44,12 +44,12 @@ manifest.json                  # resolved revision, status, timing, versions
 raw/<provider>/                 # lossless provider-native artifacts
 normalized/observations.json   # collected observation envelopes
 normalized/correlation.json    # deterministic entity correlation result
-normalized/facts.json          # normalized facts + native evidence references
-matrix/matrix.json             # complete deterministic matrix
+normalized/facts.json          # source of truth for full fact/evidence detail
+matrix/matrix.json             # schema/provider/metric metadata + row counts (no row bodies)
 matrix/coverage.json           # coverage and metric definitions
-matrix/overlap.json            # pairwise/all-provider overlap
-matrix/conflicts.json          # contradiction rows
-matrix/unmatched.json          # ambiguous/unmatched/unsupported rows
+matrix/overlap.json            # pairwise/all-provider overlap + overlap row projections
+matrix/conflicts.json          # contradiction row projections
+matrix/unmatched.json          # ambiguous/unmatched/unsupported row projections
 matrix/information-gain.json   # incremental information gain
 report.md                      # deterministic human-readable projection
 design-findings.md             # evidence/recommendations, manually authored
@@ -57,3 +57,11 @@ design-findings.md             # evidence/recommendations, manually authored
 
 `matrix/*.json` and `report.md` are generated from the persisted normalized
 artifact. They must not be hand-edited to improve presentation or metrics.
+
+`normalized/facts.json` is the single source of truth for full fact detail
+(entity path/range/kind, provider-native payload). `matrix/matrix.json` no
+longer embeds the full row set; it carries schema/provider/metric metadata
+and row counts only. `matrix/overlap.json`, `matrix/conflicts.json`, and
+`matrix/unmatched.json` persist row projections: aggregate state plus
+`factIds`/`evidenceIds`/`canonicalId` references back into
+`normalized/facts.json`, not full fact envelopes.
