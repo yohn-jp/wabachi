@@ -315,6 +315,22 @@ export const correlateEntities = correlateProviderEntities;
 
 /** Extracts definition/structural entities from the existing Observation envelope. */
 export function providerEntitiesFromObservations(observations: readonly Observation[]): ProviderEntityInput[] {
+  return extractProviderEntities(observations, true);
+}
+
+/**
+ * Extracts every endpoint represented by observations. Definitions are still
+ * preferred by the fact normalizer, but relation-only endpoints (for example
+ * call sites) must remain available when no definition observation exists.
+ */
+export function providerEntitiesFromAllObservations(observations: readonly Observation[]): ProviderEntityInput[] {
+  return extractProviderEntities(observations, false);
+}
+
+function extractProviderEntities(
+  observations: readonly Observation[],
+  preferDefinitions: boolean,
+): ProviderEntityInput[] {
   const byProvider = new Map<string, Observation[]>();
   for (const observation of observations) {
     const key = providerKey(observation.provider);
@@ -327,7 +343,7 @@ export function providerEntitiesFromObservations(observations: readonly Observat
   for (const providerObservations of byProvider.values()) {
     const hasDefinitions = providerObservations.some((observation) => observation.predicate === "defines");
     for (const observation of providerObservations) {
-      if (hasDefinitions && observation.predicate !== "defines") continue;
+      if (preferDefinitions && hasDefinitions && observation.predicate !== "defines") continue;
 
       const endpoints: ObservationEntity[] = [];
       if (observation.predicate === "defines") {
@@ -357,21 +373,22 @@ export function correlateObservations(observations: readonly Observation[]): Cor
 function toProviderEntityInput(observation: Observation, endpoint: ObservationEntity): ProviderEntityInput {
   const native = asRecord(observation.providerNative);
   const nativeNode = asRecord(native?.node);
-  const nativeRecord = nativeNode ?? native;
+  const sourceNode = asRecord(native?.sourceNode);
+  const targetNode = asRecord(native?.targetNode);
+  const endpointNode = [sourceNode, targetNode, nativeNode].find(
+    (candidate) => stringValue(candidate?.id) === endpoint.id,
+  );
+  const nativeRecord = endpointNode ?? nativeNode ?? native;
   const nativeId = stringValue(nativeRecord?.id);
   const endpointIsNode = nativeId === endpoint.id;
-  const pathValue =
-    (endpointIsNode ? stringValue(nativeRecord?.path) : undefined) ??
-    stringValue(nativeRecord?.path) ??
-    observation.source.path;
-  const spanValue =
-    (endpointIsNode ? stringValue(nativeRecord?.span) : undefined) ??
-    stringValue(nativeRecord?.span) ??
-    observation.source.span;
-  const nativeName = stringValue(nativeRecord?.name);
-  const nativeQualifiedName = stringValue(nativeRecord?.qualifiedName);
-  const nativeSignature = stringValue(nativeRecord?.signature) ?? stringValue(nativeRecord?.type);
-  const nativeAliases = stringArray(nativeRecord?.aliases);
+  const pathValue = (endpointIsNode ? stringValue(nativeRecord?.path) : undefined) ?? observation.source.path;
+  const spanValue = (endpointIsNode ? stringValue(nativeRecord?.span) : undefined) ?? observation.source.span;
+  const nativeName = endpointIsNode ? stringValue(nativeRecord?.name) : undefined;
+  const nativeQualifiedName = endpointIsNode ? stringValue(nativeRecord?.qualifiedName) : undefined;
+  const nativeSignature = endpointIsNode
+    ? (stringValue(nativeRecord?.signature) ?? stringValue(nativeRecord?.type))
+    : undefined;
+  const nativeAliases = endpointIsNode ? stringArray(nativeRecord?.aliases) : [];
   const inferredName = nativeName ?? lastSymbolPart(nativeQualifiedName ?? endpoint.id);
 
   return {

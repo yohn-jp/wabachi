@@ -3,7 +3,7 @@ import { copyFile, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { scip } from "@sourcegraph/scip-typescript/dist/src/scip.js";
-import type { Observation, ObservationPredicate } from "./observation.js";
+import { OBSERVATION_SCHEMA_VERSION, type Observation, type ObservationPredicate } from "./observation.js";
 import type { Provider, ProviderContext, ProviderExecutionResult } from "./provider.js";
 
 const execFileAsync = promisify(execFile);
@@ -92,6 +92,7 @@ function toObservations(index: scip.IndexObject, context: ProviderContext): Scip
       const isDefinition = (occurrence.symbol_roles & DEFINITION_ROLE) === DEFINITION_ROLE;
 
       observations.push({
+        schemaVersion: OBSERVATION_SCHEMA_VERSION,
         subject: { kind: "symbol", id: occurrence.symbol },
         predicate: isDefinition ? "defines" : "references",
         object: { value: document.relative_path },
@@ -119,6 +120,7 @@ function toObservations(index: scip.IndexObject, context: ProviderContext): Scip
         if (predicate === undefined) continue;
 
         observations.push({
+          schemaVersion: OBSERVATION_SCHEMA_VERSION,
           subject: { kind: "symbol", id: symbolInfo.symbol },
           predicate,
           object: { kind: "symbol", id: relationship.symbol },

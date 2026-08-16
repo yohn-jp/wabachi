@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { GraftWiringEdge, GraftWiringGraph, GraftWiringNode } from "./graftWiring.js";
-import type { Observation, ObservationPredicate } from "./observation.js";
+import { OBSERVATION_SCHEMA_VERSION, type Observation, type ObservationPredicate } from "./observation.js";
 import type { Provider, ProviderContext, ProviderExecutionResult } from "./provider.js";
 
 const execFileAsync = promisify(execFile);
@@ -140,6 +140,7 @@ function toObservation(
   context: ProviderContext,
 ): Observation {
   return {
+    schemaVersion: OBSERVATION_SCHEMA_VERSION,
     subject: { id: sourceNode.id, kind: sourceNode.kind },
     predicate,
     object: { id: targetNode.id, kind: targetNode.kind },
@@ -147,6 +148,6 @@ function toObservation(
     repository: context.repository,
     source: { path: sourceNode.path, span: sourceNode.span ?? undefined },
     determinism: "deterministic",
-    providerNative: { node: sourceNode, edge },
+    providerNative: { node: sourceNode, sourceNode, targetNode, edge },
   };
 }
