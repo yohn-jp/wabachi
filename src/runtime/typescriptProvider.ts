@@ -1,13 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import ts from "typescript";
-import type {
-  Observation,
-  ObservationObject,
-  ObservationPredicate,
-  ObservationSubject,
-  SourceLocation,
-} from "./observation.js";
+import type { Observation, ObservationEntity, ObservationPredicate, SourceEvidence } from "./observation.js";
 import type { Provider, ProviderContext, ProviderExecutionResult } from "./provider.js";
 
 /**
@@ -52,7 +46,7 @@ export function createTypeScriptProvider(): Provider {
         .getSourceFiles()
         .filter((sf) => !sf.isDeclarationFile && rootFileNames.has(path.resolve(sf.fileName)));
 
-      const collector = new ObservationCollector(checker, context, program);
+      const collector = new ObservationCollector(checker, context);
       for (const sourceFile of sourceFiles) {
         collector.visitSourceFile(sourceFile);
       }
@@ -162,24 +156,38 @@ const NAMED_DECLARATION_KINDS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.ModuleDeclaration,
 ]);
 
+interface NativeEntry {
+  readonly kind: string;
+  readonly name: string;
+  readonly qualifiedName: string;
+  readonly symbolFlags?: string | number;
+  readonly type?: string;
+  readonly span: string;
+}
+
 class ObservationCollector {
   readonly observations: Observation[] = [];
-  readonly nativeBySourceFile = new Map<string, unknown[]>();
+  readonly nativeBySourceFile = new Map<string, NativeEntry[]>();
   private readonly repository: { readonly source: string; readonly commitSha: string };
   private readonly workspaceRoot: string;
+  private readonly providerIdentity: {
+    readonly id: string;
+    readonly version: string;
+    readonly determinism: "deterministic";
+  };
 
   constructor(
     private readonly checker: ts.TypeChecker,
     context: ProviderContext,
-    private readonly program: ts.Program,
   ) {
     this.repository = context.repository;
     this.workspaceRoot = context.workspaceRoot;
+    this.providerIdentity = { id: "typescript", version: ts.version, determinism: "deterministic" };
   }
 
   visitSourceFile(sourceFile: ts.SourceFile): void {
     const relPath = path.relative(this.workspaceRoot, sourceFile.fileName);
-    const nativeEntries: unknown[] = [];
+    const nativeEntries: NativeEntry[] = [];
     this.nativeBySourceFile.set(relPath, nativeEntries);
 
     const visit = (node: ts.Node): void => {
@@ -209,61 +217,55 @@ class ObservationCollector {
     ts.forEachChild(sourceFile, visit);
   }
 
-  private location(sourceFile: ts.SourceFile, node: ts.Node): SourceLocation {
+  private span(sourceFile: ts.SourceFile, node: ts.Node): string {
     const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
     const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
-    return {
-      path: path.relative(this.workspaceRoot, sourceFile.fileName),
-      startLine: start.line + 1,
-      startColumn: start.character + 1,
-      endLine: end.line + 1,
-      endColumn: end.character + 1,
-    };
+    return `L${start.line + 1}C${start.character + 1}-L${end.line + 1}C${end.character + 1}`;
+  }
+
+  private evidence(sourceFile: ts.SourceFile, node: ts.Node): SourceEvidence {
+    return { path: path.relative(this.workspaceRoot, sourceFile.fileName), span: this.span(sourceFile, node) };
   }
 
   private push(
     predicate: ObservationPredicate,
-    subject: ObservationSubject,
-    object: ObservationObject,
+    subject: ObservationEntity,
+    object: ObservationEntity | { readonly value: string },
+    source: SourceEvidence,
     native: unknown,
   ): void {
     this.observations.push({
-      predicate,
       subject,
+      predicate,
       object,
-      provider: { id: "typescript", version: ts.version },
+      provider: this.providerIdentity,
       repository: this.repository,
-      derivation: "deterministic",
-      native,
+      source,
+      determinism: "deterministic",
+      providerNative: native,
     });
   }
 
-  private emitDefinition(sourceFile: ts.SourceFile, node: ts.NamedDeclaration, nativeEntries: unknown[]): void {
+  private emitDefinition(sourceFile: ts.SourceFile, node: ts.NamedDeclaration, nativeEntries: NativeEntry[]): void {
     if (node.name === undefined || !isIdentifierLike(node.name)) return;
     const symbol = this.checker.getSymbolAtLocation(node.name);
     const name = node.name.getText(sourceFile);
     const kind = ts.SyntaxKind[node.kind];
-    const loc = this.location(sourceFile, node);
+    const span = this.span(sourceFile, node);
 
     const qualifiedName = symbol ? this.checker.getFullyQualifiedName(symbol) : name;
     const symbolFlags = symbol ? (ts.SymbolFlags[symbol.flags] ?? symbol.flags) : undefined;
     const typeText = symbol ? safeTypeToString(this.checker, symbol, node) : undefined;
 
-    const native = {
-      kind,
-      name,
-      qualifiedName,
-      symbolFlags,
-      type: typeText,
-      location: loc,
-    };
-    nativeEntries.push(native);
+    nativeEntries.push({ kind, name, qualifiedName, symbolFlags, type: typeText, span });
+    const relPath = path.relative(this.workspaceRoot, sourceFile.fileName);
 
     this.push(
       "defines",
-      { kind: "module", name: loc.path },
-      { kind, name: qualifiedName, location: loc, value: typeText },
-      native,
+      { id: relPath, kind: "module" },
+      { id: qualifiedName, kind },
+      this.evidence(sourceFile, node),
+      { kind, name, qualifiedName, symbolFlags, type: typeText, span },
     );
   }
 
@@ -273,7 +275,6 @@ class ObservationCollector {
     const subjectName = subjectSymbol
       ? this.checker.getFullyQualifiedName(subjectSymbol)
       : node.name.getText(sourceFile);
-    const subjectLoc = this.location(sourceFile, node);
     const subjectKind = ts.SyntaxKind[node.kind];
 
     for (const clause of node.heritageClauses ?? []) {
@@ -282,13 +283,13 @@ class ObservationCollector {
         const objectName = typeExpr.expression.getText(sourceFile);
         const objectSymbol = this.checker.getSymbolAtLocation(typeExpr.expression);
         const qualifiedObjectName = objectSymbol ? this.checker.getFullyQualifiedName(objectSymbol) : objectName;
-        const native = { subjectKind, subject: subjectName, predicate, object: qualifiedObjectName };
 
         this.push(
           predicate,
-          { kind: subjectKind, name: subjectName, location: subjectLoc },
-          { kind: "type-reference", name: qualifiedObjectName, location: this.location(sourceFile, typeExpr) },
-          native,
+          { id: subjectName, kind: subjectKind },
+          { id: qualifiedObjectName, kind: "type-reference" },
+          this.evidence(sourceFile, typeExpr),
+          { subjectKind, subject: subjectName, predicate, object: qualifiedObjectName },
         );
       }
     }
@@ -296,64 +297,64 @@ class ObservationCollector {
 
   private emitImport(sourceFile: ts.SourceFile, node: ts.ImportDeclaration): void {
     const moduleSpecifier = node.moduleSpecifier.getText(sourceFile).replace(/^['"]|['"]$/gu, "");
-    const loc = this.location(sourceFile, node);
+    const relPath = path.relative(this.workspaceRoot, sourceFile.fileName);
     this.push(
       "imports",
-      { kind: "module", name: loc.path },
-      { kind: "module", name: moduleSpecifier, location: loc },
+      { id: relPath, kind: "module" },
+      { id: moduleSpecifier, kind: "module" },
+      this.evidence(sourceFile, node),
       { text: node.getText(sourceFile) },
     );
   }
 
-  private emitModifierExport(sourceFile: ts.SourceFile, statement: ts.Statement): void {
-    const loc = this.location(sourceFile, statement);
-    const names = declaredNames(statement);
-    for (const name of names.length > 0 ? names : [loc.path]) {
-      this.push(
-        "exports",
-        { kind: "module", name: loc.path },
-        { kind: "declaration", name, location: loc },
-        { text: statement.getText(sourceFile).slice(0, 200) },
-      );
-    }
-  }
-
   private emitExport(sourceFile: ts.SourceFile, node: ts.ExportDeclaration | ts.ExportAssignment): void {
-    const loc = this.location(sourceFile, node);
+    const relPath = path.relative(this.workspaceRoot, sourceFile.fileName);
     const moduleSpecifier =
       ts.isExportDeclaration(node) && node.moduleSpecifier
         ? node.moduleSpecifier.getText(sourceFile).replace(/^['"]|['"]$/gu, "")
         : undefined;
     this.push(
       "exports",
-      { kind: "module", name: loc.path },
-      { kind: "module", name: moduleSpecifier ?? loc.path, location: loc },
+      { id: relPath, kind: "module" },
+      { id: moduleSpecifier ?? relPath, kind: "module" },
+      this.evidence(sourceFile, node),
       { text: node.getText(sourceFile) },
     );
+  }
+
+  private emitModifierExport(sourceFile: ts.SourceFile, statement: ts.Statement): void {
+    const relPath = path.relative(this.workspaceRoot, sourceFile.fileName);
+    const names = declaredNames(statement);
+    for (const name of names.length > 0 ? names : [relPath]) {
+      this.push(
+        "exports",
+        { id: relPath, kind: "module" },
+        { id: name, kind: "declaration" },
+        this.evidence(sourceFile, statement),
+        { text: statement.getText(sourceFile).slice(0, 200) },
+      );
+    }
   }
 
   private emitCall(sourceFile: ts.SourceFile, node: ts.CallExpression): void {
     const signature = this.checker.getResolvedSignature(node);
     const declaration = signature?.declaration;
     const calleeText = node.expression.getText(sourceFile);
-    const loc = this.location(sourceFile, node);
+    const relPath = path.relative(this.workspaceRoot, sourceFile.fileName);
 
-    let calleeName = calleeText;
-    let calleeLocation: SourceLocation | undefined;
-    if (declaration && declaration.getSourceFile()) {
-      const declSourceFile = declaration.getSourceFile();
-      const symbol = this.checker.getSymbolAtLocation(node.expression);
-      calleeName = symbol ? this.checker.getFullyQualifiedName(symbol) : calleeText;
-      calleeLocation = this.location(declSourceFile, declaration);
-    } else {
+    if (!declaration || !declaration.getSourceFile()) {
       // Unresolved call target (e.g. dynamic/ambient): record what the compiler can see without inventing a resolution.
       return;
     }
 
+    const symbol = this.checker.getSymbolAtLocation(node.expression);
+    const calleeName = symbol ? this.checker.getFullyQualifiedName(symbol) : calleeText;
+
     this.push(
       "calls",
-      { kind: "call-site", name: loc.path, location: loc },
-      { kind: "function", name: calleeName, location: calleeLocation },
+      { id: `${relPath}#${this.span(sourceFile, node)}`, kind: "call-site" },
+      { id: calleeName, kind: "function" },
+      this.evidence(sourceFile, node),
       { calleeText },
     );
   }

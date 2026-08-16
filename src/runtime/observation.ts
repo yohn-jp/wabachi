@@ -1,48 +1,46 @@
+import type { DeterminismClass, ProviderIdentity, ResolvedRepository } from "./provider.js";
+
 /**
- * Minimal provider observation envelope (see Issue #5). Providers emit
- * observations to express comparable subject/predicate/object facts while
- * retaining provider-native evidence and provenance.
+ * Minimal common interchange envelope for comparing provider evidence
+ * (Wabachi Issue #5). This is intentionally not the final semantic fact
+ * schema — only the smallest shape needed to express a subject/predicate/
+ * object observation while retaining provenance and the provider's native
+ * payload so no information is discarded during normalization.
  */
 
-export type ObservationDerivation = "deterministic" | "non-deterministic";
-
-export interface SourceLocation {
-  readonly path: string;
-  readonly startLine: number;
-  readonly startColumn: number;
-  readonly endLine: number;
-  readonly endColumn: number;
-}
-
-export interface ObservationSubject {
-  readonly kind: string;
-  readonly name: string;
-  readonly location?: SourceLocation;
-}
-
-export interface ObservationObject {
-  readonly kind: string;
-  readonly name: string;
-  readonly location?: SourceLocation;
-  readonly value?: string;
-}
-
+/** Predicates multiple providers can realistically expose, per Issue #5. */
 export type ObservationPredicate =
-  "defines" | "references" | "calls" | "imports" | "exports" | "extends" | "implements" | "type-of";
+  | "defines"
+  | "references"
+  | "calls"
+  | "imports"
+  | "exports"
+  | "extends"
+  | "implements"
+  | "type-of"
+  | "reads"
+  | "writes"
+  | "flows-to"
+  | "depends-on";
+
+export interface ObservationEntity {
+  readonly id: string;
+  readonly kind: string;
+}
+
+export interface SourceEvidence {
+  readonly path: string;
+  readonly span?: string;
+}
 
 export interface Observation {
+  readonly subject: ObservationEntity;
   readonly predicate: ObservationPredicate;
-  readonly subject: ObservationSubject;
-  readonly object: ObservationObject;
-  readonly provider: {
-    readonly id: string;
-    readonly version: string;
-  };
-  readonly repository: {
-    readonly source: string;
-    readonly commitSha: string;
-  };
-  readonly derivation: ObservationDerivation;
-  /** Provider-native payload/reference so information is not discarded. */
-  readonly native: unknown;
+  readonly object: ObservationEntity | { readonly value: string };
+  readonly provider: ProviderIdentity;
+  readonly repository: ResolvedRepository;
+  readonly source: SourceEvidence;
+  readonly determinism: DeterminismClass;
+  /** Original provider-native record this observation was adapted from, so nothing is lost. */
+  readonly providerNative: unknown;
 }

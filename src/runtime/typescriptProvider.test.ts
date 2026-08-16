@@ -144,12 +144,14 @@ test("emits defines observations for classes, interfaces, and overloaded functio
   await provider.execute(makeContext(workspaceRoot, artifactRoot));
   const observations = await readObservations(artifactRoot);
   const defines = observations.filter((o) => o.predicate === "defines");
+  const objectId = (o: Observation): string => ("id" in o.object ? o.object.id : "");
+  const objectKind = (o: Observation): string => ("kind" in o.object ? o.object.kind : "");
 
-  assert.ok(defines.some((o) => o.object.kind === "InterfaceDeclaration" && o.object.name.includes("Shape")));
-  assert.ok(defines.some((o) => o.object.kind === "ClassDeclaration" && o.object.name.includes("Circle")));
-  assert.ok(defines.some((o) => o.object.kind === "ClassDeclaration" && o.object.name.includes("ColoredCircle")));
+  assert.ok(defines.some((o) => objectKind(o) === "InterfaceDeclaration" && objectId(o).includes("Shape")));
+  assert.ok(defines.some((o) => objectKind(o) === "ClassDeclaration" && objectId(o).includes("Circle")));
+  assert.ok(defines.some((o) => objectKind(o) === "ClassDeclaration" && objectId(o).includes("ColoredCircle")));
 
-  const overloadDefines = defines.filter((o) => o.object.name.includes("overload"));
+  const overloadDefines = defines.filter((o) => objectId(o).includes("overload"));
   assert.ok(overloadDefines.length >= 1, "expected at least one definition for the overloaded function");
 });
 
@@ -164,13 +166,13 @@ test("emits extends and implements observations from heritage clauses", async ()
 
   const implementsObs = observations.find((o) => o.predicate === "implements");
   assert.ok(implementsObs);
-  assert.match(implementsObs.subject.name, /Circle$/u);
-  assert.match(implementsObs.object.name, /Shape$/u);
+  assert.match(implementsObs.subject.id, /Circle$/u);
+  assert.ok("id" in implementsObs.object && /Shape$/u.test(implementsObs.object.id));
 
   const extendsObs = observations.find((o) => o.predicate === "extends");
   assert.ok(extendsObs);
-  assert.match(extendsObs.subject.name, /ColoredCircle$/u);
-  assert.match(extendsObs.object.name, /Circle$/u);
+  assert.match(extendsObs.subject.id, /ColoredCircle$/u);
+  assert.ok("id" in extendsObs.object && /Circle$/u.test(extendsObs.object.id));
 });
 
 test("emits imports observations and resolves aliased import calls", async () => {
@@ -182,13 +184,13 @@ test("emits imports observations and resolves aliased import calls", async () =>
   await provider.execute(makeContext(workspaceRoot, artifactRoot));
   const observations = await readObservations(artifactRoot);
 
-  const importObs = observations.find((o) => o.predicate === "imports" && o.subject.name.endsWith("index.ts"));
+  const importObs = observations.find((o) => o.predicate === "imports" && o.subject.id.endsWith("index.ts"));
   assert.ok(importObs);
-  assert.match(importObs.object.name, /shapes\.js$/u);
+  assert.ok("id" in importObs.object && /shapes\.js$/u.test(importObs.object.id));
 
   const callObs = observations.filter((o) => o.predicate === "calls");
   assert.ok(
-    callObs.some((o) => o.object.name.includes("describe")),
+    callObs.some((o) => "id" in o.object && o.object.id.includes("describe")),
     "expected a call observation resolving to the imported describe function",
   );
 });

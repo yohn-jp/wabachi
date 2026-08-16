@@ -2,6 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createFixtureProvider } from "./runtime/fixtureProvider.js";
+import { createGraftProvider } from "./runtime/graftProvider.js";
 import { run } from "./runtime/run.js";
 import { createTypeScriptProvider } from "./runtime/typescriptProvider.js";
 
@@ -45,7 +46,7 @@ async function runRunCommand(args: string[]): Promise<number> {
       source,
       revision,
       runRoot,
-      providers: [createFixtureProvider(), createTypeScriptProvider()],
+      providers: [createFixtureProvider(), createTypeScriptProvider(), createGraftProvider()],
     });
     console.log(manifestPath);
     return 0;
