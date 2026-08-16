@@ -3,6 +3,7 @@ import { copyFile, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { scip } from "@sourcegraph/scip-typescript/dist/src/scip.js";
+import { OBSERVATION_SCHEMA_VERSION } from "./observation.js";
 const execFileAsync = promisify(execFile);
 const RAW_INDEX_FILENAME = "index.scip";
 const OBSERVATIONS_FILENAME = "observations.json";
@@ -50,6 +51,7 @@ export function createScipTypescriptProvider() {
             return {
                 status: "ok",
                 artifacts: [RAW_INDEX_FILENAME, OBSERVATIONS_FILENAME],
+                observationArtifacts: [OBSERVATIONS_FILENAME],
                 startedAt,
                 finishedAt: new Date().toISOString(),
             };
@@ -74,6 +76,7 @@ function toObservations(index, context) {
             const span = toSpan(occurrence.range);
             const isDefinition = (occurrence.symbol_roles & DEFINITION_ROLE) === DEFINITION_ROLE;
             observations.push({
+                schemaVersion: OBSERVATION_SCHEMA_VERSION,
                 subject: { kind: "symbol", id: occurrence.symbol },
                 predicate: isDefinition ? "defines" : "references",
                 object: { value: document.relative_path },
@@ -96,6 +99,7 @@ function toObservations(index, context) {
                 if (predicate === undefined)
                     continue;
                 observations.push({
+                    schemaVersion: OBSERVATION_SCHEMA_VERSION,
                     subject: { kind: "symbol", id: symbolInfo.symbol },
                     predicate,
                     object: { kind: "symbol", id: relationship.symbol },

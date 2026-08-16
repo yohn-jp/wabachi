@@ -100,6 +100,7 @@ export function createTypeScriptProvider(): Provider {
       return {
         status: "ok",
         artifacts: [metaRelativePath, diagnosticsRelativePath, observationsRelativePath, ...nativeArtifacts],
+        observationArtifacts: [observationsRelativePath],
         startedAt,
         finishedAt: new Date().toISOString(),
       };

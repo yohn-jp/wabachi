@@ -64,6 +64,7 @@ export function createScipTypescriptProvider(): Provider {
       return {
         status: "ok",
         artifacts: [RAW_INDEX_FILENAME, OBSERVATIONS_FILENAME],
+        observationArtifacts: [OBSERVATIONS_FILENAME],
         startedAt,
         finishedAt: new Date().toISOString(),
       };

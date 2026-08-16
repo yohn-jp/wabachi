@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   FACT_SCHEMA_VERSION,
@@ -811,17 +811,18 @@ function buildOverlap(
   factClasses: readonly string[],
   rows: readonly MatrixFactRecord[],
 ): ProviderMatrixOverlap {
+  const index = indexComparableFactSets(facts, entries, factClasses);
   const pairwise: PairwiseOverlap[] = [];
   for (let leftIndex = 0; leftIndex < entries.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < entries.length; rightIndex += 1) {
       const left = entries[leftIndex];
       const right = entries[rightIndex];
       for (const factClass of factClasses) {
-        pairwise.push(buildPairwiseOverlap(left, right, factClass, facts));
+        pairwise.push(buildPairwiseOverlap(left, right, factClass, index));
       }
     }
   }
-  const allProviders = factClasses.map((factClass) => buildAllProviderOverlap(providers, entries, factClass, facts));
+  const allProviders = factClasses.map((factClass) => buildAllProviderOverlap(providers, entries, factClass, index));
   return {
     pairwise: pairwise.sort(comparePairwiseOverlap),
     allProviders: allProviders.sort((left, right) => left.factClass.localeCompare(right.factClass)),
@@ -829,14 +830,48 @@ function buildOverlap(
   };
 }
 
+/**
+ * Groups comparable facts by provider and fact class once so pairwise and
+ * all-provider overlap can look up a set instead of re-scanning every fact
+ * descriptor for every provider pair. Without this index, overlap
+ * construction is O(providers^2 x factClasses x facts), which took minutes
+ * and pegged a CPU core against the real TypeScript provider's fact volume.
+ */
+function indexComparableFactSets(
+  facts: readonly FactDescriptor[],
+  entries: readonly ProviderIdentityEntry[],
+  factClasses: readonly string[],
+): ReadonlyMap<string, ComparableFactSets> {
+  const index = new Map<string, { byLogical: Map<string, Set<string>> }>();
+  for (const entry of entries) {
+    for (const factClass of factClasses) {
+      index.set(indexKey(entry.key, factClass), { byLogical: new Map() });
+    }
+  }
+  for (const descriptor of facts) {
+    if (!descriptor.comparable || descriptor.logicalKey === undefined) continue;
+    const key = indexKey(descriptor.providerKey, descriptor.factClass);
+    const entry = index.get(key);
+    if (entry === undefined) continue;
+    const values = entry.byLogical.get(descriptor.logicalKey) ?? new Set<string>();
+    values.add(descriptor.exactKey);
+    entry.byLogical.set(descriptor.logicalKey, values);
+  }
+  return index;
+}
+
+function indexKey(providerKeyValue: string, factClass: string): string {
+  return `${providerKeyValue}\u0000${factClass}`;
+}
+
 function buildPairwiseOverlap(
   left: ProviderIdentityEntry,
   right: ProviderIdentityEntry,
   factClass: string,
-  facts: readonly FactDescriptor[],
+  index: ReadonlyMap<string, ComparableFactSets>,
 ): PairwiseOverlap {
-  const leftSets = comparableFactSets(facts, left.key, factClass);
-  const rightSets = comparableFactSets(facts, right.key, factClass);
+  const leftSets = index.get(indexKey(left.key, factClass)) ?? { byLogical: new Map() };
+  const rightSets = index.get(indexKey(right.key, factClass)) ?? { byLogical: new Map() };
   const logicalKeys = new Set([...leftSets.byLogical.keys(), ...rightSets.byLogical.keys()]);
   const overlapFactKeys = intersection(exactKeys(leftSets.byLogical), exactKeys(rightSets.byLogical));
   const leftOnly = [...leftSets.byLogical.keys()].filter((key) => !rightSets.byLogical.has(key)).sort();
@@ -870,15 +905,16 @@ function buildAllProviderOverlap(
   providers: readonly ProviderIdentity[],
   entries: readonly ProviderIdentityEntry[],
   factClass: string,
-  facts: readonly FactDescriptor[],
+  index: ReadonlyMap<string, ComparableFactSets>,
 ): AllProviderOverlap {
-  const exactSets = entries.map((entry) => comparableFactSets(facts, entry.key, factClass));
+  const exactSets = entries.map((entry) => index.get(indexKey(entry.key, factClass)) ?? { byLogical: new Map() });
+  const exactKeySets = exactSets.map((set) => new Set(exactKeys(set.byLogical)));
   const union = new Set<string>();
-  for (const set of exactSets) for (const key of exactKeys(set.byLogical)) union.add(key);
+  for (const keys of exactKeySets) for (const key of keys) union.add(key);
   const overlap =
     entries.length === 0
       ? []
-      : [...union].filter((key) => exactSets.every((set) => exactKeys(set.byLogical).includes(key))).sort();
+      : [...union].filter((key) => exactKeySets.every((keys) => keys.has(key))).sort();
   return {
     factClass,
     providers,
@@ -888,18 +924,6 @@ function buildAllProviderOverlap(
     allProviderOverlapCoverage: ratio(overlap.length, union.size),
     overlapFactKeys: overlap,
   };
-}
-
-function comparableFactSets(facts: readonly FactDescriptor[], provider: string, factClass: string): ComparableFactSets {
-  const byLogical = new Map<string, Set<string>>();
-  for (const descriptor of facts) {
-    if (!descriptor.comparable || descriptor.providerKey !== provider || descriptor.factClass !== factClass) continue;
-    if (descriptor.logicalKey === undefined) continue;
-    const values = byLogical.get(descriptor.logicalKey) ?? new Set<string>();
-    values.add(descriptor.exactKey);
-    byLogical.set(descriptor.logicalKey, values);
-  }
-  return { byLogical };
 }
 
 function buildInformationGain(
@@ -916,14 +940,18 @@ function buildInformationGain(
     const providerFacts = facts.filter((descriptor) => descriptor.providerKey === entry.key && descriptor.comparable);
     const exactKeysForProvider = [...new Set(providerFacts.map((descriptor) => descriptor.exactKey))].sort();
     const newComparableFactKeys = exactKeysForProvider.filter((key) => !baseline.has(key));
+    const newComparableFactKeySet = new Set(newComparableFactKeys);
+    const factsByClass = new Map<string, FactDescriptor[]>();
+    for (const descriptor of providerFacts) {
+      const group = factsByClass.get(descriptor.factClass) ?? [];
+      group.push(descriptor);
+      factsByClass.set(descriptor.factClass, group);
+    }
     const classCounts = factClasses
       .map((factClass) => {
-        const classKeys = new Set(
-          providerFacts
-            .filter((descriptor) => descriptor.factClass === factClass)
-            .map((descriptor) => descriptor.exactKey),
-        );
-        const newKeys = [...classKeys].filter((key) => newComparableFactKeys.includes(key)).sort();
+        const classFacts = factsByClass.get(factClass) ?? [];
+        const classKeys = new Set(classFacts.map((descriptor) => descriptor.exactKey));
+        const newKeys = [...classKeys].filter((key) => newComparableFactKeySet.has(key)).sort();
         return { factClass, newComparableFactCount: newKeys.length, newComparableFactKeys: newKeys };
       })
       .filter((item) => item.newComparableFactCount > 0);
@@ -1414,17 +1442,57 @@ export async function writeNormalizedFactsArtifact(
   filePath: string,
   input: NormalizedFactsArtifact | FactNormalizationResult,
 ): Promise<string> {
-  const artifact: NormalizedFactsArtifact = {
-    schemaVersion: FACT_SCHEMA_VERSION,
-    facts: input.facts,
-    unsupported: input.unsupported,
-    correlation: input.correlation,
-    ...(input.comparisons === undefined ? {} : { comparisons: input.comparisons }),
-  };
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeJson(filePath, artifact);
+  const handle = await open(filePath, "w");
+  const writer = new JsonArtifactWriter(handle);
+  try {
+    const artifact = {
+      schemaVersion: FACT_SCHEMA_VERSION,
+      facts: input.facts.map(persistFactEnvelope),
+      unsupported: input.unsupported.map(persistUnsupportedEvidence),
+      correlation: input.correlation,
+    };
+    await writer.writeValue(artifact);
+    await writer.write("\n");
+    await writer.flush();
+  } finally {
+    await handle.close();
+  }
   return filePath;
 }
+
+/**
+ * The in-memory envelope retains providerNative as a convenience alias, while
+ * the persisted artifact stores the payload once under nativeEvidence and
+ * replaces duplicate aliases with an auditable local reference.
+ */
+function persistFactEnvelope(fact: FactEnvelope): FactEnvelope {
+  const reference = { $ref: `nativeEvidence:${fact.nativeEvidence.id}/providerNative` };
+  return {
+    ...fact,
+    providerNative: reference,
+    nativeEvidence: {
+      ...fact.nativeEvidence,
+      providerNative: fact.nativeEvidence.providerNative,
+      observation: { ...fact.nativeEvidence.observation, providerNative: reference },
+    },
+  };
+}
+
+function persistUnsupportedEvidence(evidence: UnsupportedProviderEvidence): UnsupportedProviderEvidence {
+  const reference = { $ref: `nativeEvidence:${evidence.nativeEvidence.id}/providerNative` };
+  return {
+    ...evidence,
+    providerNative: reference,
+    nativeEvidence: {
+      ...evidence.nativeEvidence,
+      providerNative: evidence.nativeEvidence.providerNative,
+      observation: { ...evidence.nativeEvidence.observation, providerNative: reference },
+    },
+  };
+}
+
+
 
 /** Reads a persisted #11 normalized-facts artifact without running providers. */
 export async function readNormalizedFactsArtifact(filePath: string): Promise<NormalizedFactsArtifact> {
@@ -1454,7 +1522,71 @@ function isProviderMatrix(
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
-  await writeFile(filePath, JSON.stringify(value, null, 2) + "\n", "utf8");
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const handle = await open(filePath, "w");
+  const writer = new JsonArtifactWriter(handle);
+  try {
+    await writer.writeValue(value);
+    await writer.write("\n");
+    await writer.flush();
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Serializes large generated artifacts without first constructing one giant
+ * JSON string. Mottainai's TypeScript observation set is large enough for a
+ * single JSON.stringify(matrix) call to exceed V8's string limit.
+ */
+class JsonArtifactWriter {
+  private buffer = "";
+
+  constructor(private readonly handle: Awaited<ReturnType<typeof open>>) {}
+
+  async write(value: string): Promise<void> {
+    this.buffer += value;
+    if (this.buffer.length >= 1024 * 1024) await this.flush();
+  }
+
+  async flush(): Promise<void> {
+    if (this.buffer.length === 0) return;
+    await this.handle.write(this.buffer);
+    this.buffer = "";
+  }
+
+  async writeValue(value: unknown): Promise<void> {
+    if (value === null) {
+      await this.write("null");
+      return;
+    }
+    if (Array.isArray(value)) {
+      await this.write("[");
+      for (let index = 0; index < value.length; index += 1) {
+        if (index > 0) await this.write(",");
+        await this.writeValue(value[index]);
+      }
+      await this.write("]");
+      return;
+    }
+    if (typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      await this.write("{");
+      let first = true;
+      for (const key of Object.keys(record)) {
+        if (record[key] === undefined) continue;
+        if (!first) await this.write(",");
+        first = false;
+        await this.write(JSON.stringify(key));
+        await this.write(":");
+        await this.writeValue(record[key]);
+      }
+      await this.write("}");
+      return;
+    }
+    const serialized = JSON.stringify(value);
+    await this.write(serialized === undefined ? "null" : serialized);
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

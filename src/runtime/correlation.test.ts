@@ -296,3 +296,30 @@ test("extracts provider-native identities from the existing observation envelope
   assert.equal(result.metrics["scip-typescript"]?.matched, 1);
   assert.equal(result.metrics.typescript?.total, 1);
 });
+
+test("records oversized deterministic candidate buckets instead of materializing an edge explosion", () => {
+  // Create 225 entities per provider = 450 members total.
+  // Potential pairs = 225 * 225 = 50,625 per candidate key.
+  // Multiple candidate keys (path-range, qualified-exact, alias-match-exact, path-name-exact)
+  // produce 101,025 total potential pairs, exceeding the 100,000 threshold.
+  const inputs = [
+    ...Array.from({ length: 225 }, (_, index) =>
+      entity(typescript, `ts-${index}`, { path: "src/large.ts", name: "shared", qualifiedName: "shared" }),
+    ),
+    ...Array.from({ length: 225 }, (_, index) =>
+      entity(scip, `scip-${index}`, { path: "src/large.ts", name: "shared", qualifiedName: "shared" }),
+    ),
+  ];
+  const result = correlateProviderEntities(inputs);
+
+  assert.equal(result.links.length, 0);
+  assert.ok(result.diagnostics.skippedKeyCount > 0);
+  assert.ok(result.diagnostics.skippedPotentialPairCount > 100_000);
+  assert.equal(result.diagnostics.maxCandidatePairsPerKey, 100_000);
+  assert.ok(result.diagnostics.skippedKeys.length > 0, "skippedKeys must contain diagnostic entries");
+  for (const skipped of result.diagnostics.skippedKeys) {
+    assert.ok(typeof skipped.keyClass === "string" && skipped.keyClass.length > 0, "keyClass must be present");
+    assert.ok(skipped.keyCount > 0, "keyCount must be positive");
+    assert.ok(skipped.potentialPairCount > 100_000, "potentialPairCount must exceed threshold");
+  }
+});
