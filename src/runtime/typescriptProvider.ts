@@ -1,7 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import ts from "typescript";
-import type { Observation, ObservationEntity, ObservationPredicate, SourceEvidence } from "./observation.js";
+import {
+  OBSERVATION_SCHEMA_VERSION,
+  type Observation,
+  type ObservationEntity,
+  type ObservationPredicate,
+  type SourceEvidence,
+} from "./observation.js";
 import type { Provider, ProviderContext, ProviderExecutionResult } from "./provider.js";
 
 /**
@@ -235,6 +241,7 @@ class ObservationCollector {
     native: unknown,
   ): void {
     this.observations.push({
+      schemaVersion: OBSERVATION_SCHEMA_VERSION,
       subject,
       predicate,
       object,
