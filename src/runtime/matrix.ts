@@ -1576,7 +1576,13 @@ function isProviderMatrix(
   return isRecord(value) && value.schemaVersion === PROVIDER_MATRIX_SCHEMA_VERSION && "metricDefinitions" in value;
 }
 
-async function writeJson(filePath: string, value: unknown): Promise<void> {
+/**
+ * Streams a value to disk through `JsonArtifactWriter` instead of building
+ * one `JSON.stringify(value)` string first. Exported so every large
+ * generated artifact (not just the ones matrix.ts itself writes) can avoid
+ * the same V8 string-length limit.
+ */
+export async function writeStreamingJson(filePath: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
   const handle = await open(filePath, "w");
   const writer = new JsonArtifactWriter(handle);
@@ -1589,12 +1595,16 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
   }
 }
 
+async function writeJson(filePath: string, value: unknown): Promise<void> {
+  await writeStreamingJson(filePath, value);
+}
+
 /**
  * Serializes large generated artifacts without first constructing one giant
  * JSON string. Mottainai's TypeScript observation set is large enough for a
  * single JSON.stringify(matrix) call to exceed V8's string limit.
  */
-class JsonArtifactWriter {
+export class JsonArtifactWriter {
   private buffer = "";
 
   constructor(private readonly handle: Awaited<ReturnType<typeof open>>) {}

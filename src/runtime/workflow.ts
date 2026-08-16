@@ -15,6 +15,7 @@ import {
   buildProviderMatrix,
   writeNormalizedFactsArtifact,
   writeProviderMatrixArtifacts,
+  writeStreamingJson,
   type ProviderMatrix,
   type ProviderMatrixArtifactPaths,
 } from "./matrix.js";
@@ -63,7 +64,7 @@ export async function runProviderMatrix(options: MatrixWorkflowOptions): Promise
   const providerIds = options.providers.map((provider) => provider.identity.id);
   const additionOrderIds = options.additionOrder ?? providerIds;
   await mkdir(runRoot, { recursive: true });
-  await writeJson(path.join(runRoot, "config.json"), {
+  await writeStreamingJson(path.join(runRoot, "config.json"), {
     schemaVersion: MATRIX_WORKFLOW_SCHEMA_VERSION,
     command: "matrix",
     source: options.source,
@@ -87,7 +88,7 @@ export async function runProviderMatrix(options: MatrixWorkflowOptions): Promise
 
   const observations = await readObservationArtifacts(runRoot, runResult);
   const observationPath = path.join(runRoot, "normalized", "observations.json");
-  await writeJson(observationPath, {
+  await writeStreamingJson(observationPath, {
     schemaVersion: OBSERVATION_SCHEMA_VERSION,
     repository: runResult.manifest.repository,
     observations,
@@ -101,7 +102,7 @@ export async function runProviderMatrix(options: MatrixWorkflowOptions): Promise
   await writeNormalizedFactsArtifact(normalizedFactsPath, normalized);
 
   const correlationPath = path.join(runRoot, "normalized", "correlation.json");
-  await writeJson(correlationPath, {
+  await writeStreamingJson(correlationPath, {
     schemaVersion: 1,
     inputFactSchemaVersion: FACT_SCHEMA_VERSION,
     repository: runResult.manifest.repository,
@@ -198,11 +199,6 @@ function assertCommitSha(value: string): void {
   if (!/^[0-9a-f]{40}$/iu.test(value)) {
     throw new Error("matrix requires an explicit 40-character commit SHA via --revision");
   }
-}
-
-async function writeJson(filePath: string, value: unknown): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
 /** Public type anchor for callers that persist the result for later review. */
