@@ -35,7 +35,13 @@ export interface MatrixWorkflowOptions {
   readonly revision: string;
   readonly runRoot: string;
   readonly providers: readonly Provider[];
-  readonly additionOrder?: readonly ProviderIdentity[];
+  /**
+   * Provider ids in the requested addition order. Ids are stable across
+   * execution; a provider's resolved version (e.g. Graft's) is only known
+   * after `execute()` runs, so identities are resolved from the post-run
+   * manifest rather than from the pre-execution `Provider.identity` getter.
+   */
+  readonly additionOrder?: readonly string[];
 }
 
 export interface MatrixWorkflowResult extends RunResult {
@@ -54,8 +60,8 @@ export interface MatrixWorkflowResult extends RunResult {
 export async function runProviderMatrix(options: MatrixWorkflowOptions): Promise<MatrixWorkflowResult> {
   assertCommitSha(options.revision);
   const runRoot = path.resolve(options.runRoot);
-  const providerIdentities = options.providers.map((provider) => provider.identity);
-  const additionOrder = options.additionOrder ?? providerIdentities;
+  const providerIds = options.providers.map((provider) => provider.identity.id);
+  const additionOrderIds = options.additionOrder ?? providerIds;
   await mkdir(runRoot, { recursive: true });
   await writeJson(path.join(runRoot, "config.json"), {
     schemaVersion: MATRIX_WORKFLOW_SCHEMA_VERSION,
@@ -63,8 +69,8 @@ export async function runProviderMatrix(options: MatrixWorkflowOptions): Promise
     source: options.source,
     revision: options.revision.toLowerCase(),
     nodeOptions: process.env.NODE_OPTIONS ?? "default",
-    providers: providerIdentities.map((provider) => provider.id),
-    additionOrder: additionOrder.map((provider) => provider.id),
+    providers: providerIds,
+    additionOrder: additionOrderIds,
   });
 
   const runResult = await run({
@@ -103,8 +109,14 @@ export async function runProviderMatrix(options: MatrixWorkflowOptions): Promise
     correlation: normalized.correlation,
   });
 
+  const executedIdentities = runResult.manifest.providers.map((entry) => entry.identity);
+  const identityById = new Map(executedIdentities.map((identity) => [identity.id, identity]));
+  const additionOrder = additionOrderIds
+    .map((id) => identityById.get(id))
+    .filter((identity): identity is ProviderIdentity => identity !== undefined);
+
   const matrix = buildProviderMatrix(normalized, {
-    providers: runResult.manifest.providers.map((entry) => entry.identity),
+    providers: executedIdentities,
     additionOrder,
   });
   const matrixPaths = await writeProviderMatrixArtifacts(runRoot, matrix);

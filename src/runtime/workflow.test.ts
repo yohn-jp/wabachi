@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { test } from "node:test";
-import { buildProviderMatrixFromArtifact } from "./matrix.js";
+import { buildProviderMatrixFromArtifact, readNormalizedFactsArtifact } from "./matrix.js";
 import { OBSERVATION_SCHEMA_VERSION, type Observation } from "./observation.js";
 import type { Provider, ProviderContext, ProviderExecutionResult } from "./provider.js";
 import { runProviderMatrix } from "./workflow.js";
@@ -17,9 +17,11 @@ test("runs providers once and persists the complete downstream workflow", async 
   const runRoot = await mkdtemp(path.join(os.tmpdir(), "wabachi-workflow-run-"));
   let executions = 0;
   try {
-    await execFileAsync("git", ["init", "-q"], { cwd: repository });
+    await execFileAsync("git", ["init", "-q", "-b", "main"], { cwd: repository });
     await execFileAsync("git", ["config", "user.email", "test@example.com"], { cwd: repository });
     await execFileAsync("git", ["config", "user.name", "Test"], { cwd: repository });
+    await execFileAsync("git", ["config", "commit.gpgsign", "false"], { cwd: repository });
+    await execFileAsync("git", ["config", "core.hooksPath", "/dev/null"], { cwd: repository });
     await writeFile(path.join(repository, "main.ts"), "export const value = 1;\n", "utf8");
     await execFileAsync("git", ["add", "main.ts"], { cwd: repository });
     await execFileAsync("git", ["commit", "-q", "-m", "fixture"], { cwd: repository });
@@ -68,6 +70,14 @@ test("runs providers once and persists the complete downstream workflow", async 
     });
     assert.deepEqual(fromPersistedFacts, result.matrix);
     assert.equal(executions, 1, "matrix generation must not rerun providers");
+
+    const persistedFacts = await readNormalizedFactsArtifact(result.normalizedFactsPath);
+    assert.ok(persistedFacts.facts.length > 0, "expected at least one persisted fact");
+    for (const fact of persistedFacts.facts) {
+      assert.deepEqual(fact.providerNative, { source: "fixture" });
+      assert.deepEqual(fact.nativeEvidence.providerNative, { source: "fixture" });
+      assert.deepEqual(fact.nativeEvidence.observation.providerNative, { source: "fixture" });
+    }
   } finally {
     await rm(repository, { recursive: true, force: true });
     await rm(runRoot, { recursive: true, force: true });

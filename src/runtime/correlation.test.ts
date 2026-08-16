@@ -298,11 +298,17 @@ test("extracts provider-native identities from the existing observation envelope
 });
 
 test("records oversized deterministic candidate buckets instead of materializing an edge explosion", () => {
+  // Candidate generation is provider-aware: a shared key's potential pair
+  // count is the cross-provider product (leftCount * rightCount), not the
+  // full same-key clique. 320 entities per provider gives 320 * 320 =
+  // 102,400 potential pairs, just above MAX_CANDIDATE_PAIRS_PER_KEY
+  // (100,000) for every key class this fixture activates.
+  const perProvider = 320;
   const inputs = [
-    ...Array.from({ length: 225 }, (_, index) =>
+    ...Array.from({ length: perProvider }, (_, index) =>
       entity(typescript, `ts-${index}`, { path: "src/large.ts", name: "shared", qualifiedName: "shared" }),
     ),
-    ...Array.from({ length: 225 }, (_, index) =>
+    ...Array.from({ length: perProvider }, (_, index) =>
       entity(scip, `scip-${index}`, { path: "src/large.ts", name: "shared", qualifiedName: "shared" }),
     ),
   ];
@@ -312,4 +318,17 @@ test("records oversized deterministic candidate buckets instead of materializing
   assert.ok(result.diagnostics.skippedKeyCount > 0);
   assert.ok(result.diagnostics.skippedPotentialPairCount > 100_000);
   assert.equal(result.diagnostics.maxCandidatePairsPerKey, 100_000);
+  // Every normalized key class this fixture's shared path/name/qualifiedName
+  // activates (see candidateKeys) must be represented and skipped, each with
+  // a real potential pair count over the cap.
+  assert.deepEqual(result.diagnostics.skippedKeys.map((item) => item.keyClass).sort(), [
+    "alias-match-exact",
+    "name-exact",
+    "path-name-exact",
+    "qualified-exact",
+  ]);
+  for (const item of result.diagnostics.skippedKeys) {
+    assert.ok(item.keyCount > 0);
+    assert.ok(item.potentialPairCount > 100_000);
+  }
 });

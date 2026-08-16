@@ -320,7 +320,7 @@ export function compareFactSets(facts: readonly FactEnvelope[], options: Compari
   }
 
   return [...groups.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareCodeUnits(left, right))
     .map(([, group]) => compareFacts(group.facts, { providers: options.providers, unsupported: group.unsupported }));
 }
 
@@ -463,10 +463,10 @@ function selectEntityInputs(
     // occurrence here turns large repositories into an O(n²) ambiguity graph.
     if ((preferredByNative.get(nativeKey) ?? []).length > 0) continue;
     const representative = [...candidates].sort((left, right) => {
-      const fingerprint = entityFingerprint(left).localeCompare(entityFingerprint(right));
+      const fingerprint = compareCodeUnits(entityFingerprint(left), entityFingerprint(right));
       return fingerprint !== 0
         ? fingerprint
-        : stableSerialize(left.providerNative).localeCompare(stableSerialize(right.providerNative));
+        : compareCodeUnits(stableSerialize(left.providerNative), stableSerialize(right.providerNative));
     })[0];
     if (representative !== undefined) selected.push(representative);
   }
@@ -519,12 +519,12 @@ function deduplicateEntityInputs(inputs: readonly ProviderEntityInput[]): Provid
     const previous = byKey.get(key);
     if (
       previous === undefined ||
-      stableSerialize(input.providerNative).localeCompare(stableSerialize(previous.providerNative)) < 0
+      compareCodeUnits(stableSerialize(input.providerNative), stableSerialize(previous.providerNative)) < 0
     ) {
       byKey.set(key, input);
     }
   }
-  return [...byKey.values()].sort((left, right) => entityFingerprint(left).localeCompare(entityFingerprint(right)));
+  return [...byKey.values()].sort((left, right) => compareCodeUnits(entityFingerprint(left), entityFingerprint(right)));
 }
 
 function indexAssignments(correlation: CorrelationResult): EntityAssignments {
@@ -649,19 +649,19 @@ function sortFactsForOutput(values: readonly FactEnvelope[]): FactEnvelope[] {
     return key;
   };
   return [...values].sort((left, right) => {
-    const keyCompare = keyFor(left).localeCompare(keyFor(right));
-    return keyCompare !== 0 ? keyCompare : left.factId.localeCompare(right.factId);
+    const keyCompare = compareCodeUnits(keyFor(left), keyFor(right));
+    return keyCompare !== 0 ? keyCompare : compareCodeUnits(left.factId, right.factId);
   });
 }
 
 function compareUnsupportedForOutput(left: UnsupportedProviderEvidence, right: UnsupportedProviderEvidence): number {
   const leftKey = stableSerialize({ group: comparisonGroupKey(left), native: left.nativeEvidence.id });
   const rightKey = stableSerialize({ group: comparisonGroupKey(right), native: right.nativeEvidence.id });
-  return leftKey.localeCompare(rightKey);
+  return compareCodeUnits(leftKey, rightKey);
 }
 
 function compareProviders(left: ProviderIdentity, right: ProviderIdentity): number {
-  return providerKey(left).localeCompare(providerKey(right));
+  return compareCodeUnits(providerKey(left), providerKey(right));
 }
 
 function providerKey(provider: ProviderIdentity): string {
@@ -780,6 +780,14 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/**
+ * Deterministic ordering independent of host locale/ICU data. Artifact
+ * ordering must reproduce identically across machines.
+ */
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function stableSerialize(value: unknown): string {

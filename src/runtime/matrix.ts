@@ -518,7 +518,7 @@ function buildComparableRow(
     variantsByKey.set(descriptor.exactKey, variant);
   }
   const variants = [...variantsByKey.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareCodeUnits(left, right))
     .map(([, group]) => buildFactVariant(group));
   const observedProviders = uniqueProviders(descriptors.map((descriptor) => descriptor.fact.provider));
   const state: MatrixFactState =
@@ -708,9 +708,11 @@ function buildProviderCoverage(
   const factCorrelation = countFactCorrelation(providerFacts);
   const rawObservedFactCount = providerFacts.length + providerUnsupported.length;
   const uniqueFactKeys = uniqueKeysForProvider(providerFacts, uniqueLogicalProviders);
+  const factsByClass = groupByFactClass(providerFacts);
+  const unsupportedByClass = groupByFactClass(providerUnsupported);
   const factClassCoverage = factClasses.map((factClass) => {
-    const classFacts = providerFacts.filter((descriptor) => descriptor.factClass === factClass);
-    const classUnsupported = providerUnsupported.filter((descriptor) => descriptor.factClass === factClass);
+    const classFacts = factsByClass.get(factClass) ?? [];
+    const classUnsupported = unsupportedByClass.get(factClass) ?? [];
     const classCorrelation = countFactCorrelation(classFacts);
     const classUniqueFactKeys = uniqueKeysForProvider(classFacts, uniqueLogicalProviders);
     return {
@@ -741,6 +743,16 @@ function buildProviderCoverage(
     factClasses: factClassCoverage,
     entityCorrelation,
   };
+}
+
+function groupByFactClass<T extends { readonly factClass: string }>(descriptors: readonly T[]): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const descriptor of descriptors) {
+    const group = groups.get(descriptor.factClass) ?? [];
+    group.push(descriptor);
+    groups.set(descriptor.factClass, group);
+  }
+  return groups;
 }
 
 function countFactCorrelation(facts: readonly FactDescriptor[]): MatrixFactCorrelationCounts {
@@ -825,7 +837,7 @@ function buildOverlap(
   const allProviders = factClasses.map((factClass) => buildAllProviderOverlap(providers, entries, factClass, index));
   return {
     pairwise: pairwise.sort(comparePairwiseOverlap),
-    allProviders: allProviders.sort((left, right) => left.factClass.localeCompare(right.factClass)),
+    allProviders: allProviders.sort((left, right) => compareCodeUnits(left.factClass, right.factClass)),
     facts: rows.filter((row) => row.state === "overlap"),
   };
 }
@@ -842,7 +854,7 @@ function indexComparableFactSets(
   entries: readonly ProviderIdentityEntry[],
   factClasses: readonly string[],
 ): ReadonlyMap<string, ComparableFactSets> {
-  const index = new Map<string, ComparableFactSets>();
+  const index = new Map<string, { byLogical: Map<string, Set<string>> }>();
   for (const entry of entries) {
     for (const factClass of factClasses) {
       index.set(indexKey(entry.key, factClass), { byLogical: new Map() });
@@ -853,15 +865,16 @@ function indexComparableFactSets(
     const key = indexKey(descriptor.providerKey, descriptor.factClass);
     const entry = index.get(key);
     if (entry === undefined) continue;
-    const values = (entry.byLogical as Map<string, Set<string>>).get(descriptor.logicalKey) ?? new Set<string>();
+    const values = entry.byLogical.get(descriptor.logicalKey) ?? new Set<string>();
     values.add(descriptor.exactKey);
-    (entry.byLogical as Map<string, Set<string>>).set(descriptor.logicalKey, values);
+    entry.byLogical.set(descriptor.logicalKey, values);
   }
   return index;
 }
 
+/** Collision-free even when providerKeyValue or factClass contain the delimiter. */
 function indexKey(providerKeyValue: string, factClass: string): string {
-  return providerKeyValue + " " + factClass;
+  return JSON.stringify([providerKeyValue, factClass]);
 }
 
 function buildPairwiseOverlap(
@@ -912,9 +925,7 @@ function buildAllProviderOverlap(
   const union = new Set<string>();
   for (const keys of exactKeySets) for (const key of keys) union.add(key);
   const overlap =
-    entries.length === 0
-      ? []
-      : [...union].filter((key) => exactKeySets.every((keys) => keys.has(key))).sort();
+    entries.length === 0 ? [] : [...union].filter((key) => exactKeySets.every((keys) => keys.has(key))).sort();
   return {
     factClass,
     providers,
@@ -941,13 +952,15 @@ function buildInformationGain(
     const exactKeysForProvider = [...new Set(providerFacts.map((descriptor) => descriptor.exactKey))].sort();
     const newComparableFactKeys = exactKeysForProvider.filter((key) => !baseline.has(key));
     const newComparableFactKeySet = new Set(newComparableFactKeys);
+    const keysByClass = new Map<string, Set<string>>();
+    for (const descriptor of providerFacts) {
+      const values = keysByClass.get(descriptor.factClass) ?? new Set<string>();
+      values.add(descriptor.exactKey);
+      keysByClass.set(descriptor.factClass, values);
+    }
     const classCounts = factClasses
       .map((factClass) => {
-        const classKeys = new Set(
-          providerFacts
-            .filter((descriptor) => descriptor.factClass === factClass)
-            .map((descriptor) => descriptor.exactKey),
-        );
+        const classKeys = keysByClass.get(factClass) ?? new Set<string>();
         const newKeys = [...classKeys].filter((key) => newComparableFactKeySet.has(key)).sort();
         return { factClass, newComparableFactCount: newKeys.length, newComparableFactKeys: newKeys };
       })
@@ -1026,7 +1039,7 @@ function collectRepositories(
   const values = [...facts.map((item) => item.fact.repository), ...unsupported.map((item) => item.evidence.repository)];
   const byKey = new Map<string, ResolvedRepository>();
   for (const repository of values) byKey.set(stableSerialize(repository), repository);
-  return [...byKey.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, value]) => value);
+  return [...byKey.entries()].sort(([left], [right]) => compareCodeUnits(left, right)).map(([, value]) => value);
 }
 
 function ratio(numerator: number, denominator: number): MatrixRatio {
@@ -1038,19 +1051,19 @@ function providerKey(provider: ProviderIdentity): string {
 }
 
 function compareProviderEntries(left: ProviderIdentityEntry, right: ProviderIdentityEntry): number {
-  return left.key.localeCompare(right.key);
+  return compareCodeUnits(left.key, right.key);
 }
 
 function compareProviders(left: ProviderIdentity, right: ProviderIdentity): number {
-  return providerKey(left).localeCompare(providerKey(right));
+  return compareCodeUnits(providerKey(left), providerKey(right));
 }
 
 function compareFactDescriptors(left: FactDescriptor, right: FactDescriptor): number {
-  const key = left.exactKey.localeCompare(right.exactKey);
+  const key = compareCodeUnits(left.exactKey, right.exactKey);
   if (key !== 0) return key;
-  const provider = left.providerKey.localeCompare(right.providerKey);
+  const provider = compareCodeUnits(left.providerKey, right.providerKey);
   if (provider !== 0) return provider;
-  return left.fact.factId.localeCompare(right.fact.factId);
+  return compareCodeUnits(left.fact.factId, right.fact.factId);
 }
 
 function sortFactDescriptors(values: readonly FactDescriptor[]): FactDescriptor[] {
@@ -1068,7 +1081,7 @@ function compareUnsupportedDescriptors(left: UnsupportedDescriptor, right: Unsup
     provider: right.providerKey,
     evidence: right.evidence.nativeEvidence.id,
   });
-  return leftKey.localeCompare(rightKey);
+  return compareCodeUnits(leftKey, rightKey);
 }
 
 function sortUnsupportedDescriptors(values: readonly UnsupportedDescriptor[]): UnsupportedDescriptor[] {
@@ -1076,23 +1089,23 @@ function sortUnsupportedDescriptors(values: readonly UnsupportedDescriptor[]): U
 }
 
 function compareMatrixRows(left: MatrixFactRecord, right: MatrixFactRecord): number {
-  const repository = stableSerialize(left.repository).localeCompare(stableSerialize(right.repository));
+  const repository = compareCodeUnits(stableSerialize(left.repository), stableSerialize(right.repository));
   if (repository !== 0) return repository;
-  const factClass = left.factClass.localeCompare(right.factClass);
+  const factClass = compareCodeUnits(left.factClass, right.factClass);
   if (factClass !== 0) return factClass;
-  return left.key.localeCompare(right.key);
+  return compareCodeUnits(left.key, right.key);
 }
 
 function compareVariants(left: MatrixFactVariant, right: MatrixFactVariant): number {
-  return left.key.localeCompare(right.key);
+  return compareCodeUnits(left.key, right.key);
 }
 
 function comparePairwiseOverlap(left: PairwiseOverlap, right: PairwiseOverlap): number {
-  const provider = providerKey(left.left).localeCompare(providerKey(right.left));
+  const provider = compareCodeUnits(providerKey(left.left), providerKey(right.left));
   if (provider !== 0) return provider;
-  const rightProvider = providerKey(left.right).localeCompare(providerKey(right.right));
+  const rightProvider = compareCodeUnits(providerKey(left.right), providerKey(right.right));
   if (rightProvider !== 0) return rightProvider;
-  return left.factClass.localeCompare(right.factClass);
+  return compareCodeUnits(left.factClass, right.factClass);
 }
 
 function uniqueProviders(values: readonly ProviderIdentity[]): ProviderIdentity[] {
@@ -1114,6 +1127,14 @@ function setsEqual(left: ReadonlySet<string>, right: ReadonlySet<string>): boole
   if (left.size !== right.size) return false;
   for (const value of left) if (!right.has(value)) return false;
   return true;
+}
+
+/**
+ * Deterministic ordering independent of host locale/ICU data. Artifact
+ * ordering must reproduce identically across machines.
+ */
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function stableSerialize(value: unknown): string {
@@ -1441,13 +1462,16 @@ export async function writeNormalizedFactsArtifact(
 ): Promise<string> {
   await mkdir(path.dirname(filePath), { recursive: true });
   const handle = await open(filePath, "w");
+  const writer = new JsonArtifactWriter(handle);
   try {
-    await handle.write(`{"schemaVersion":${FACT_SCHEMA_VERSION},"facts":[`);
-    await writeJsonArray(handle, input.facts, persistFactEnvelope);
-    await handle.write(`],"unsupported":[`);
-    await writeJsonArray(handle, input.unsupported, persistUnsupportedEvidence);
-    await handle.write(`],"correlation":${JSON.stringify(input.correlation)}`);
-    await handle.write("}\n");
+    await writer.write(`{"schemaVersion":${FACT_SCHEMA_VERSION},"facts":`);
+    await writer.writeArray(input.facts, persistFactEnvelope);
+    await writer.write(`,"unsupported":`);
+    await writer.writeArray(input.unsupported, persistUnsupportedEvidence);
+    await writer.write(`,"correlation":`);
+    await writer.writeValue(input.correlation);
+    await writer.write("}\n");
+    await writer.flush();
   } finally {
     await handle.close();
   }
@@ -1455,12 +1479,16 @@ export async function writeNormalizedFactsArtifact(
 }
 
 /**
- * The in-memory envelope retains providerNative as a convenience alias, while
- * the persisted artifact stores the payload once under nativeEvidence and
- * replaces duplicate aliases with an auditable local reference.
+ * The in-memory envelope carries the provider-native payload in three
+ * places (`providerNative`, `nativeEvidence.providerNative`, and
+ * `nativeEvidence.observation.providerNative`). Persisting all three
+ * verbatim would triple the artifact's size for no benefit, so the payload
+ * is retained once under `nativeEvidence.providerNative` and the other two
+ * locations become `$ref` pointers that `resolveNativeEvidenceRefs` (used by
+ * `readNormalizedFactsArtifact`) expands back on read.
  */
 function persistFactEnvelope(fact: FactEnvelope): FactEnvelope {
-  const reference = { $ref: `nativeEvidence:${fact.nativeEvidence.id}/providerNative` };
+  const reference = nativeEvidenceRef(fact.nativeEvidence.id);
   return {
     ...fact,
     providerNative: reference,
@@ -1472,7 +1500,7 @@ function persistFactEnvelope(fact: FactEnvelope): FactEnvelope {
 }
 
 function persistUnsupportedEvidence(evidence: UnsupportedProviderEvidence): UnsupportedProviderEvidence {
-  const reference = { $ref: `nativeEvidence:${evidence.nativeEvidence.id}/providerNative` };
+  const reference = nativeEvidenceRef(evidence.nativeEvidence.id);
   return {
     ...evidence,
     providerNative: reference,
@@ -1483,20 +1511,41 @@ function persistUnsupportedEvidence(evidence: UnsupportedProviderEvidence): Unsu
   };
 }
 
-async function writeJsonArray<T>(
-  handle: Awaited<ReturnType<typeof open>>,
-  values: readonly T[],
-  transform: (value: T) => unknown,
-): Promise<void> {
-  let buffer = "";
-  for (let index = 0; index < values.length; index += 1) {
-    buffer += (index === 0 ? "" : ",") + JSON.stringify(transform(values[index]));
-    if (buffer.length >= 1024 * 1024) {
-      await handle.write(buffer);
-      buffer = "";
-    }
+function nativeEvidenceRef(nativeEvidenceId: string): { readonly $ref: string } {
+  return { $ref: `nativeEvidence:${nativeEvidenceId}/providerNative` };
+}
+
+const NATIVE_EVIDENCE_REF_PATTERN = /^nativeEvidence:(.+)\/providerNative$/u;
+
+/**
+ * Resolves every `$ref` produced by `persistFactEnvelope`/`persistUnsupportedEvidence`
+ * back to the retained `nativeEvidence.providerNative` payload, so a reader
+ * of the persisted artifact recovers the exact in-memory envelope shape.
+ */
+function resolveNativeEvidenceRefs(record: { facts: unknown[]; unsupported: unknown[] }): void {
+  const byId = new Map<string, unknown>();
+  for (const item of [...record.facts, ...record.unsupported]) {
+    const entry = asRecord(item);
+    const nativeEvidence = entry === undefined ? undefined : asRecord(entry.nativeEvidence);
+    const id = nativeEvidence?.id;
+    if (typeof id === "string" && nativeEvidence !== undefined) byId.set(id, nativeEvidence.providerNative);
   }
-  if (buffer.length > 0) await handle.write(buffer);
+  const resolve = (value: unknown): unknown => {
+    const record = asRecord(value);
+    const ref = typeof record?.$ref === "string" ? NATIVE_EVIDENCE_REF_PATTERN.exec(record.$ref) : null;
+    if (ref === null) return value;
+    const target = byId.get(ref[1]);
+    return target === undefined ? value : target;
+  };
+  for (const item of [...record.facts, ...record.unsupported]) {
+    const entry = asRecord(item);
+    if (entry === undefined) continue;
+    entry.providerNative = resolve(entry.providerNative);
+    const nativeEvidence = asRecord(entry.nativeEvidence);
+    if (nativeEvidence === undefined) continue;
+    const observation = asRecord(nativeEvidence.observation);
+    if (observation !== undefined) observation.providerNative = resolve(observation.providerNative);
+  }
 }
 
 /** Reads a persisted #11 normalized-facts artifact without running providers. */
@@ -1509,6 +1558,7 @@ export async function readNormalizedFactsArtifact(filePath: string): Promise<Nor
   if (!Array.isArray(parsed.facts)) throw new Error("normalized fact artifact facts must be an array");
   if (!Array.isArray(parsed.unsupported)) throw new Error("normalized fact artifact unsupported must be an array");
   if (!isRecord(parsed.correlation)) throw new Error("normalized fact artifact correlation must be an object");
+  resolveNativeEvidenceRefs({ facts: parsed.facts, unsupported: parsed.unsupported });
   return parsed as unknown as NormalizedFactsArtifact;
 }
 
@@ -1560,6 +1610,20 @@ class JsonArtifactWriter {
     this.buffer = "";
   }
 
+  /**
+   * Streams a possibly-large array by transforming and serializing one
+   * element at a time, so the whole transformed array is never held in
+   * memory at once (unlike `writeValue(values.map(transform))`).
+   */
+  async writeArray<T>(values: readonly T[], transform: (value: T) => unknown): Promise<void> {
+    await this.write("[");
+    for (let index = 0; index < values.length; index += 1) {
+      if (index > 0) await this.write(",");
+      await this.writeValue(transform(values[index]));
+    }
+    await this.write("]");
+  }
+
   async writeValue(value: unknown): Promise<void> {
     if (value === null) {
       await this.write("null");
@@ -1592,6 +1656,10 @@ class JsonArtifactWriter {
     const serialized = JSON.stringify(value);
     await this.write(serialized === undefined ? "null" : serialized);
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

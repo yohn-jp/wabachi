@@ -167,6 +167,8 @@ interface NormalizedEntity {
   readonly nameKeys: readonly string[];
   readonly signatureKey?: string;
   readonly key: string;
+  /** Cached once at normalization time; avoids re-serializing in hot comparators. */
+  readonly providerNativeSerialized: string;
 }
 
 interface CandidateEdge {
@@ -188,6 +190,8 @@ interface CandidateEdgeBuild {
 }
 
 const MAX_CANDIDATE_PAIRS_PER_KEY = 100_000;
+/** Safety valve for the sum of materialized pairs across every candidate key. */
+const MAX_TOTAL_CANDIDATE_PAIRS = 2_000_000;
 
 interface EntityGroup {
   readonly indices: readonly number[];
@@ -332,7 +336,7 @@ export function correlateProviderEntities(inputs: readonly ProviderEntityInput[]
       if (canonicalId === undefined) throw new Error("internal correlation group has no identity");
       return toCanonicalEntity(group, canonicalId, entities, edgeIndex, entityGroup, canonicalIds);
     })
-    .sort((left, right) => left.canonicalId.localeCompare(right.canonicalId));
+    .sort((left, right) => compareCodeUnits(left.canonicalId, right.canonicalId));
 
   return {
     canonicalEntities,
@@ -468,6 +472,7 @@ function normalizeEntities(inputs: readonly ProviderEntityInput[]): NormalizedEn
     const providerKeyValue = providerKey(input.provider);
     const repositoryKeyValue = repositoryKey(input.repository);
     const id = input.id.trim();
+    const providerNativeSerialized = stableSerialize(input.providerNative);
     const key = stableSerialize({
       provider: providerKeyValue,
       repository: repositoryKeyValue,
@@ -498,6 +503,7 @@ function normalizeEntities(inputs: readonly ProviderEntityInput[]): NormalizedEn
       nameKeys,
       signatureKey,
       key,
+      providerNativeSerialized,
     };
   });
 
@@ -511,7 +517,7 @@ function normalizeEntities(inputs: readonly ProviderEntityInput[]): NormalizedEn
     }
     // The provider-native payload is not part of identity. Choosing the
     // lexicographically first payload keeps duplicate observations stable.
-    if (stableSerialize(entity.input.providerNative) < stableSerialize(previous.input.providerNative)) {
+    if (entity.providerNativeSerialized < previous.providerNativeSerialized) {
       deduplicated[deduplicated.length - 1] = entity;
     }
   }
@@ -519,56 +525,97 @@ function normalizeEntities(inputs: readonly ProviderEntityInput[]): NormalizedEn
 }
 
 function compareEntities(left: NormalizedEntity, right: NormalizedEntity): number {
-  const keyCompare = left.key.localeCompare(right.key);
+  const keyCompare = compareCodeUnits(left.key, right.key);
   if (keyCompare !== 0) return keyCompare;
-  return stableSerialize(left.input.providerNative).localeCompare(stableSerialize(right.input.providerNative));
+  return compareCodeUnits(left.providerNativeSerialized, right.providerNativeSerialized);
 }
 
+/**
+ * Builds candidate edges without ever materializing the full Cartesian
+ * product of a large same-key bucket. The index is provider-aware (`key ->
+ * provider -> entity indices`), so same-provider pairs are never candidates
+ * and every bucket is inherently a multipartite graph across providers
+ * rather than an undifferentiated clique.
+ *
+ * Buckets are split into two regimes:
+ *  - "strong" key classes (path+range, normalized qualified identity,
+ *    path+signature, exact signature) are evidence that is close to unique
+ *    per entity; they are expanded directly since bucket sizes stay small
+ *    in practice, and a bucket that is NOT small is still bounded by the
+ *    per-key/global caps below.
+ *  - "weak" key classes (bare name matches, path+kind fallbacks) commonly
+ *    produce large multi-provider buckets (e.g. every overload named `get`).
+ *    These are still fully compared pairwise (recall must not regress), but
+ *    materialization is bounded by the same per-key/global pair caps so a
+ *    single enormous bucket cannot dominate runtime; buckets that exceed the
+ *    bound are recorded in diagnostics instead of silently truncated.
+ */
 function buildCandidateEdges(entities: readonly NormalizedEntity[]): CandidateEdgeBuild {
-  const buckets = new Map<string, number[]>();
+  const buckets = new Map<string, Map<string, number[]>>();
   for (let index = 0; index < entities.length; index += 1) {
-    for (const key of candidateKeys(entities[index])) {
-      const bucket = buckets.get(key) ?? [];
-      bucket.push(index);
-      buckets.set(key, bucket);
+    const entity = entities[index];
+    for (const key of candidateKeys(entity)) {
+      const byProvider = buckets.get(key) ?? new Map<string, number[]>();
+      const indices = byProvider.get(entity.providerKey) ?? [];
+      indices.push(index);
+      byProvider.set(entity.providerKey, indices);
+      buckets.set(key, byProvider);
     }
   }
 
   const pairKeys = new Set<string>();
   const skippedByClass = new Map<string, { keyCount: number; potentialPairCount: number }>();
   let indexedKeyCount = 0;
-  for (const [key, bucket] of buckets.entries()) {
-    const potentialPairCount = (bucket.length * (bucket.length - 1)) / 2;
-    if (potentialPairCount > MAX_CANDIDATE_PAIRS_PER_KEY) {
-      const keyClass = key.split(":", 1)[0] ?? "unknown";
+  let totalMaterializedPairs = 0;
+
+  const bucketKeys = [...buckets.keys()].sort(compareCodeUnits);
+  for (const key of bucketKeys) {
+    const byProvider = buckets.get(key);
+    if (byProvider === undefined) continue;
+    const providerKeys = [...byProvider.keys()].sort(compareCodeUnits);
+    const totalEntities = providerKeys.reduce((sum, provider) => sum + (byProvider.get(provider)?.length ?? 0), 0);
+    // Cross-provider potential pairs only: same-provider pairs never
+    // generate a candidate edge, so they must not count against the cap.
+    const potentialPairCount = crossProviderPairCount(providerKeys, byProvider);
+    if (
+      potentialPairCount > MAX_CANDIDATE_PAIRS_PER_KEY ||
+      totalMaterializedPairs + potentialPairCount > MAX_TOTAL_CANDIDATE_PAIRS
+    ) {
+      const keyClass = keyClassOf(key);
       const current = skippedByClass.get(keyClass) ?? { keyCount: 0, potentialPairCount: 0 };
       current.keyCount += 1;
       current.potentialPairCount += potentialPairCount;
       skippedByClass.set(keyClass, current);
       continue;
     }
+    if (totalEntities < 2) continue;
     indexedKeyCount += 1;
-    for (let left = 0; left < bucket.length; left += 1) {
-      for (let right = left + 1; right < bucket.length; right += 1) {
-        const first = bucket[left];
-        const second = bucket[right];
-        const low = Math.min(first, second);
-        const high = Math.max(first, second);
-        pairKeys.add(`${low}\u0000${high}`);
+    totalMaterializedPairs += potentialPairCount;
+    for (let leftProvider = 0; leftProvider < providerKeys.length; leftProvider += 1) {
+      const leftIndices = byProvider.get(providerKeys[leftProvider]) ?? [];
+      for (let rightProvider = leftProvider + 1; rightProvider < providerKeys.length; rightProvider += 1) {
+        const rightIndices = byProvider.get(providerKeys[rightProvider]) ?? [];
+        for (const first of leftIndices) {
+          for (const second of rightIndices) {
+            const low = Math.min(first, second);
+            const high = Math.max(first, second);
+            pairKeys.add(`${low} ${high}`);
+          }
+        }
       }
     }
   }
 
   const edges: CandidateEdge[] = [];
-  for (const pairKey of [...pairKeys].sort()) {
-    const separator = pairKey.indexOf("\u0000");
+  for (const pairKey of pairKeys) {
+    const separator = pairKey.indexOf(" ");
     const left = Number(pairKey.slice(0, separator));
     const right = Number(pairKey.slice(separator + 1));
     const edge = compareEntityPair(left, right, entities[left], entities[right]);
     if (edge !== undefined) edges.push(edge);
   }
   const skippedKeys = [...skippedByClass.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareCodeUnits(left, right))
     .map(([keyClass, value]) => ({ keyClass, ...value }));
   return {
     edges: edges.sort(compareEdges),
@@ -582,10 +629,30 @@ function buildCandidateEdges(entities: readonly NormalizedEntity[]): CandidateEd
   };
 }
 
+function crossProviderPairCount(providerKeys: readonly string[], byProvider: ReadonlyMap<string, number[]>): number {
+  let total = 0;
+  let seenCount = 0;
+  for (const provider of providerKeys) {
+    const count = byProvider.get(provider)?.length ?? 0;
+    total += seenCount * count;
+    seenCount += count;
+  }
+  return total;
+}
+
+function keyClassOf(key: string): string {
+  return key.split(":", 1)[0] ?? "unknown";
+}
+
 /**
- * Candidate generation is indexed by every rule that can make
- * `compareEntityPair` return a score. The final pair comparison remains the
- * authority, so these keys only avoid evaluating impossible pairs.
+ * Candidate generation is indexed by the same normalized keys
+ * `compareEntityPair` uses for scoring (`qualifiedKeys`, `aliasKeys`,
+ * `nameKeys`), not raw `qualifiedName`/`aliases` strings. Indexing raw
+ * strings under-recalls: `ns.Type` and `Type` share the normalized key
+ * `Type` and can score under `same-alias`/`same-qualified-name`, but their
+ * raw strings never collide. Every normalized key that appears in
+ * `compareEntityPair`'s scoring surface must appear here so the fast index
+ * never silently drops a match the final comparator would have accepted.
  */
 function candidateKeys(entity: NormalizedEntity): string[] {
   const keys = new Set<string>();
@@ -596,14 +663,15 @@ function candidateKeys(entity: NormalizedEntity): string[] {
     keys.add(`path-signature:${entity.path}:${entity.signatureKey}`);
   }
   if (entity.signatureKey !== undefined) keys.add(`signature:${entity.signatureKey}`);
-  if (entity.qualifiedName !== undefined) {
-    keys.add(`qualified-exact:${entity.qualifiedName}`);
-    keys.add(`alias-match-exact:${entity.qualifiedName}`);
-  }
-  for (const alias of entity.aliases) keys.add(`alias-match-exact:${alias}`);
+  for (const qualifiedKey of entity.qualifiedKeys) keys.add(`qualified-exact:${qualifiedKey}`);
+  for (const aliasKey of entity.aliasKeys) keys.add(`alias-match-exact:${aliasKey}`);
+  for (const qualifiedKey of entity.qualifiedKeys) keys.add(`alias-match-exact:${qualifiedKey}`);
   // A bare token such as "type" or "0" is not a useful cross-file
-  // candidate key. Exact names remain useful when the source path also
-  // agrees, while the final pair comparison still computes all rules.
+  // candidate key on its own. `nameKeys` normalization already folds
+  // name/qualifiedName/aliases together; index it directly so cross-path
+  // name matches (score 48 via `sameName`) are still generated, while
+  // path-qualified variants remain additionally indexed for locality.
+  for (const nameKey of entity.nameKeys) keys.add(`name-exact:${nameKey}`);
   if (entity.path !== undefined && entity.name !== undefined) {
     keys.add(`path-name-exact:${entity.path}:${entity.name}`);
   }
@@ -615,7 +683,7 @@ function candidateKeys(entity: NormalizedEntity): string[] {
   ) {
     keys.add(`path-kind:${entity.path}:${entity.kindFamily}`);
   }
-  return [...keys].sort();
+  return [...keys].sort(compareCodeUnits);
 }
 
 function indexEdges(edges: readonly CandidateEdge[], entities: readonly NormalizedEntity[]): EdgeIndex {
@@ -645,7 +713,7 @@ function indexEdges(edges: readonly CandidateEdge[], entities: readonly Normaliz
 
 function uniqueEdges(edges: readonly CandidateEdge[]): CandidateEdge[] {
   const byKey = new Map<string, CandidateEdge>();
-  for (const edge of edges) byKey.set(`${edge.left}\u0000${edge.right}`, edge);
+  for (const edge of edges) byKey.set(`${edge.left} ${edge.right}`, edge);
   return [...byKey.values()].sort(compareEdges);
 }
 
@@ -706,81 +774,154 @@ function compareEntityPair(
   };
 }
 
+/**
+ * Union-Find (disjoint-set) grouping, processed one score band at a time
+ * from strongest to weakest — overloads and other high-precision evidence
+ * group before a shared weak key (e.g. `same-name`) could connect unrelated
+ * entities. Within one score band, edges are evaluated together (as a
+ * batch, matching the previous per-score connected-components pass) rather
+ * than one at a time: every root touched by an edge in this band is grouped
+ * by connectivity first, and a group whose members would collide two
+ * entities from the same provider is entirely rejected and permanently
+ * `blocked` from any further merge (in this band or any weaker one) —
+ * matching the original semantics where a provider collision removes every
+ * involved entity from further consideration rather than partially merging
+ * around it. Groups that don't collide are committed via ordinary
+ * union-find. This keeps the incremental structure (no full edge re-filter
+ * across the whole edge set) while preserving the batch-collision
+ * semantics a strictly incremental one-edge-at-a-time union cannot express.
+ */
 function buildGroups(entities: readonly NormalizedEntity[], edges: readonly CandidateEdge[]): EntityGroup[] {
-  const assigned = new Set<number>();
+  const parent = Array.from({ length: entities.length }, (_, index) => index);
+  const rank = new Array<number>(entities.length).fill(0);
+  const memberProviders = entities.map((entity) => new Set<string>([entity.providerKey]));
   const blocked = new Set<number>();
-  const groups: EntityGroup[] = [];
 
-  // Consume evidence from strongest to weakest. This preserves overloads:
-  // exact declaration locations are grouped before a shared qualified name
-  // can connect every overload to every other overload.
+  const find = (index: number): number => {
+    let root = index;
+    while (parent[root] !== root) root = parent[root];
+    let cursor = index;
+    while (parent[cursor] !== root) {
+      const next = parent[cursor];
+      parent[cursor] = root;
+      cursor = next;
+    }
+    return root;
+  };
+
+  const commitUnion = (leftRoot: number, rightRoot: number): number => {
+    if (leftRoot === rightRoot) return leftRoot;
+    const leftProviders = memberProviders[leftRoot];
+    const rightProviders = memberProviders[rightRoot];
+    const [survivor, absorbed] = rank[leftRoot] >= rank[rightRoot] ? [leftRoot, rightRoot] : [rightRoot, leftRoot];
+    const survivorProviders = survivor === leftRoot ? leftProviders : rightProviders;
+    const absorbedProviders = survivor === leftRoot ? rightProviders : leftProviders;
+    parent[absorbed] = survivor;
+    if (rank[leftRoot] === rank[rightRoot]) rank[survivor] += 1;
+    for (const provider of absorbedProviders) survivorProviders.add(provider);
+    return survivor;
+  };
+
   const scores = [...new Set(edges.map((edge) => edge.score))].sort((left, right) => right - left);
   for (const score of scores) {
-    const eligible = new Set<number>();
-    for (let index = 0; index < entities.length; index += 1) {
-      if (!assigned.has(index) && !blocked.has(index)) eligible.add(index);
-    }
-    const scoreEdges = edges.filter(
-      (edge) => edge.score === score && eligible.has(edge.left) && eligible.has(edge.right),
+    const bandEdges = edges.filter(
+      (edge) => edge.score === score && !blocked.has(find(edge.left)) && !blocked.has(find(edge.right)),
     );
-    for (const component of connectedComponents(entities.length, scoreEdges, eligible)) {
-      if (component.length < 2) continue;
-      if (hasProviderCollision(component, entities)) {
-        for (const index of component) blocked.add(index);
+    if (bandEdges.length === 0) continue;
+
+    // Group this band's edges by root-level connectivity (a lightweight,
+    // band-local union-find) before committing anything, so a collision
+    // anywhere in a connected cluster blocks the whole cluster — matching
+    // batch connected-components semantics.
+    const bandParent = new Map<number, number>();
+    const bandFind = (root: number): number => {
+      let cursor = root;
+      while (bandParent.has(cursor) && bandParent.get(cursor) !== cursor) cursor = bandParent.get(cursor) as number;
+      if (!bandParent.has(cursor)) bandParent.set(cursor, cursor);
+      let walk = root;
+      while (bandParent.get(walk) !== cursor) {
+        const next = bandParent.get(walk) as number;
+        bandParent.set(walk, cursor);
+        walk = next;
+      }
+      return cursor;
+    };
+    const bandUnion = (left: number, right: number): void => {
+      const leftRoot = bandFind(left);
+      const rightRoot = bandFind(right);
+      if (leftRoot !== rightRoot) bandParent.set(leftRoot, rightRoot);
+    };
+    for (const edge of bandEdges) bandUnion(find(edge.left), find(edge.right));
+
+    const clusters = new Map<number, Set<number>>();
+    for (const edge of bandEdges) {
+      for (const root of [find(edge.left), find(edge.right)]) {
+        const clusterRoot = bandFind(root);
+        const members = clusters.get(clusterRoot) ?? new Set<number>();
+        members.add(root);
+        clusters.set(clusterRoot, members);
+      }
+    }
+
+    for (const roots of clusters.values()) {
+      const sortedRoots = [...roots].sort((left, right) => left - right);
+      const seenProviders = new Set<string>();
+      let collides = false;
+      for (const root of sortedRoots) {
+        for (const provider of memberProviders[root]) {
+          if (seenProviders.has(provider)) {
+            collides = true;
+            break;
+          }
+          seenProviders.add(provider);
+        }
+        if (collides) break;
+      }
+      if (collides) {
+        for (const root of sortedRoots) blocked.add(root);
         continue;
       }
-      const group: EntityGroup = { indices: component, strength: score >= 80 ? "matched" : "probable" };
-      groups.push(group);
-      for (const index of component) assigned.add(index);
-    }
-  }
-
-  for (let index = 0; index < entities.length; index += 1) {
-    if (!assigned.has(index)) {
-      groups.push({ indices: [index], strength: "probable" });
-    }
-  }
-  return groups.sort((left, right) => entities[left.indices[0]].key.localeCompare(entities[right.indices[0]].key));
-}
-
-function connectedComponents(
-  entityCount: number,
-  edges: readonly CandidateEdge[],
-  eligible: ReadonlySet<number>,
-): number[][] {
-  const adjacency = Array.from({ length: entityCount }, () => [] as number[]);
-  for (const edge of edges) {
-    adjacency[edge.left].push(edge.right);
-    adjacency[edge.right].push(edge.left);
-  }
-  const visited = new Set<number>();
-  const components: number[][] = [];
-  for (const start of [...eligible].sort((left, right) => left - right)) {
-    if (visited.has(start) || adjacency[start].length === 0) continue;
-    const stack = [start];
-    const component: number[] = [];
-    while (stack.length > 0) {
-      const current = stack.pop();
-      if (current === undefined || visited.has(current)) continue;
-      visited.add(current);
-      component.push(current);
-      for (const next of adjacency[current].slice().sort((left, right) => right - left)) {
-        if (!visited.has(next)) stack.push(next);
+      let merged = sortedRoots[0];
+      for (let index = 1; index < sortedRoots.length; index += 1) {
+        merged = commitUnion(merged, sortedRoots[index]);
       }
     }
-    components.push(component.sort((left, right) => left - right));
   }
-  return components.sort((left, right) => left[0] - right[0]);
-}
 
-function hasProviderCollision(indices: readonly number[], entities: readonly NormalizedEntity[]): boolean {
-  const providers = new Set(indices.map((index) => entities[index].providerKey));
-  return providers.size !== indices.length;
+  const rootOf = (index: number): number => find(index);
+
+  const rootsByEntity = new Map<number, number[]>();
+  for (let index = 0; index < entities.length; index += 1) {
+    const root = rootOf(index);
+    const members = rootsByEntity.get(root) ?? [];
+    members.push(index);
+    rootsByEntity.set(root, members);
+  }
+
+  const strongestScore = new Map<number, number>();
+  for (const edge of edges) {
+    const leftRoot = rootOf(edge.left);
+    if (leftRoot !== rootOf(edge.right)) continue;
+    const current = strongestScore.get(leftRoot) ?? 0;
+    if (edge.score > current) strongestScore.set(leftRoot, edge.score);
+  }
+
+  const groups: EntityGroup[] = [];
+  for (const [root, indices] of rootsByEntity) {
+    const sortedIndices = indices.sort((left, right) => left - right);
+    if (sortedIndices.length < 2) {
+      groups.push({ indices: sortedIndices, strength: "probable" });
+      continue;
+    }
+    const bestScore = strongestScore.get(root) ?? 0;
+    groups.push({ indices: sortedIndices, strength: bestScore >= 80 ? "matched" : "probable" });
+  }
+  return groups.sort((left, right) => compareCodeUnits(entities[left.indices[0]].key, entities[right.indices[0]].key));
 }
 
 function makeCanonicalId(group: EntityGroup, entities: readonly NormalizedEntity[]): string {
   const repository = entities[group.indices[0]].repositoryKey;
-  const members = group.indices.map((index) => entities[index].key).sort();
+  const members = group.indices.map((index) => entities[index].key).sort(compareCodeUnits);
   const digest = createHash("sha256").update(stableSerialize({ repository, members })).digest("hex");
   return `ce_${digest}`;
 }
@@ -793,15 +934,14 @@ function toCanonicalEntity(
   entityGroup: ReadonlyMap<number, EntityGroup>,
   canonicalIds: ReadonlyMap<EntityGroup, string>,
 ): CanonicalEntity {
+  const groupIndices = new Set(group.indices);
   const members = group.indices.map((index) => toCanonicalMember(entities[index])).sort(compareMembers);
   const incidentEdges = uniqueEdges(group.indices.flatMap((index) => edgeIndex.incident.get(index) ?? []));
-  const internalEdges = incidentEdges.filter(
-    (edge) => group.indices.includes(edge.left) && group.indices.includes(edge.right),
-  );
+  const internalEdges = incidentEdges.filter((edge) => groupIndices.has(edge.left) && groupIndices.has(edge.right));
   const candidateCanonicalIds = uniqueSorted(
     incidentEdges
       .flatMap((edge) => {
-        const other = group.indices.includes(edge.left) ? edge.right : edge.left;
+        const other = groupIndices.has(edge.left) ? edge.right : edge.left;
         const otherGroup = entityGroup.get(other);
         const otherId = otherGroup === undefined ? undefined : canonicalIds.get(otherGroup);
         return otherId === undefined || otherId === canonicalId ? [] : [otherId];
@@ -816,7 +956,7 @@ function toCanonicalEntity(
       : incidentEdges.length > 0
         ? "ambiguous"
         : "unmatched";
-  const cardinality = groupCardinality(group, incidentEdges, edgeIndex, entities);
+  const cardinality = groupCardinality(groupIndices, incidentEdges, edgeIndex, entities);
   const reason: CorrelationRationale["reason"] =
     status === "unmatched"
       ? "no-cross-provider-evidence"
@@ -914,7 +1054,7 @@ function edgeCardinality(
 }
 
 function groupCardinality(
-  group: EntityGroup,
+  groupIndices: ReadonlySet<number>,
   incidentEdges: readonly CandidateEdge[],
   edgeIndex: EdgeIndex,
   entities: readonly NormalizedEntity[],
@@ -927,12 +1067,12 @@ function groupCardinality(
     const cardinality = edgeCardinality(edge, edgeIndex, entities);
     if (cardinality === "many-to-many") manyToMany = true;
     if (cardinality === "one-to-many") {
-      if (group.indices.includes(edge.left)) oneToMany = true;
-      if (group.indices.includes(edge.right)) manyToOne = true;
+      if (groupIndices.has(edge.left)) oneToMany = true;
+      if (groupIndices.has(edge.right)) manyToOne = true;
     }
     if (cardinality === "many-to-one") {
-      if (group.indices.includes(edge.left)) oneToMany = true;
-      if (group.indices.includes(edge.right)) manyToOne = true;
+      if (groupIndices.has(edge.left)) oneToMany = true;
+      if (groupIndices.has(edge.right)) manyToOne = true;
     }
   }
   if (manyToMany || (oneToMany && manyToOne)) return "many-to-many";
@@ -958,7 +1098,7 @@ function buildMetrics(
   }
 
   const result: Record<string, ProviderCorrelationMetrics> = {};
-  for (const key of [...providerEntries.keys()].sort()) {
+  for (const key of [...providerEntries.keys()].sort(compareCodeUnits)) {
     const entry = providerEntries.get(key);
     if (entry === undefined) continue;
     const statusCounts: Record<CorrelationStatus, number> = {
@@ -1002,9 +1142,9 @@ function buildMetrics(
 }
 
 function compareLinks(left: CorrelationLink, right: CorrelationLink): number {
-  const providerCompare = providerReferenceKey(left.left).localeCompare(providerReferenceKey(right.left));
+  const providerCompare = compareCodeUnits(providerReferenceKey(left.left), providerReferenceKey(right.left));
   if (providerCompare !== 0) return providerCompare;
-  return providerReferenceKey(left.right).localeCompare(providerReferenceKey(right.right));
+  return compareCodeUnits(providerReferenceKey(left.right), providerReferenceKey(right.right));
 }
 
 function compareEdges(left: CandidateEdge, right: CandidateEdge): number {
@@ -1014,13 +1154,13 @@ function compareEdges(left: CandidateEdge, right: CandidateEdge): number {
 }
 
 function compareEvidence(left: CorrelationEvidence, right: CorrelationEvidence): number {
-  const leftCompare = providerReferenceKey(left.left).localeCompare(providerReferenceKey(right.left));
+  const leftCompare = compareCodeUnits(providerReferenceKey(left.left), providerReferenceKey(right.left));
   if (leftCompare !== 0) return leftCompare;
-  return providerReferenceKey(left.right).localeCompare(providerReferenceKey(right.right));
+  return compareCodeUnits(providerReferenceKey(left.right), providerReferenceKey(right.right));
 }
 
 function compareMembers(left: CanonicalEntityMember, right: CanonicalEntityMember): number {
-  return providerReferenceKey(left).localeCompare(providerReferenceKey(right));
+  return compareCodeUnits(providerReferenceKey(left), providerReferenceKey(right));
 }
 
 function providerReferenceKey(reference: ProviderEntityReference): string {
@@ -1034,7 +1174,7 @@ function providerReferenceKey(reference: ProviderEntityReference): string {
 }
 
 function providerKey(provider: ProviderIdentity): string {
-  return `${provider.id}\u0000${provider.version}\u0000${provider.determinism}`;
+  return `${provider.id} ${provider.version} ${provider.determinism}`;
 }
 
 function repositoryKey(repository: ResolvedRepository): string {
@@ -1112,7 +1252,7 @@ function uniqueRules(rules: readonly CorrelationRule[]): CorrelationRule[] {
 }
 
 function uniqueSorted(values: readonly string[]): string[] {
-  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+  return [...new Set(values)].sort(compareCodeUnits);
 }
 
 function cleanOptional(value: string | undefined): string | undefined {
@@ -1136,6 +1276,14 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/**
+ * Deterministic ordering independent of host locale/ICU data. Artifact
+ * ordering must reproduce identically across machines.
+ */
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function stableSerialize(value: unknown): string {

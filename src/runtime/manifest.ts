@@ -41,7 +41,10 @@ export async function collectToolchainVersions(): Promise<Readonly<Record<string
 
 async function commandVersion(command: string, args: readonly string[], cwd?: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync(command, [...args], cwd === undefined ? undefined : { cwd });
+    const { stdout } = await execFileAsync(command, [...args], {
+      encoding: "utf8",
+      ...(cwd === undefined ? {} : { cwd }),
+    });
     return stdout.trim().split("\n")[0] ?? "unknown";
   } catch {
     return "unavailable";
