@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createFixtureProvider } from "./runtime/fixtureProvider.js";
 import { run } from "./runtime/run.js";
+import { createTypeScriptProvider } from "./runtime/typescriptProvider.js";
 export async function runCli(argv) {
     const command = argv[0];
     if (command === undefined || command === "--help" || command === "-h") {
@@ -35,7 +36,7 @@ async function runRunCommand(args) {
             source,
             revision,
             runRoot,
-            providers: [createFixtureProvider()],
+            providers: [createFixtureProvider(), createTypeScriptProvider()],
         });
         console.log(manifestPath);
         return 0;
