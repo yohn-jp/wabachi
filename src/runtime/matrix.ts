@@ -1664,7 +1664,7 @@ const NATIVE_EVIDENCE_REF_PATTERN = /^nativeEvidence:(.+)\/providerNative$/u;
  * back to the retained `nativeEvidence.providerNative` payload, so a reader
  * of the persisted artifact recovers the exact in-memory envelope shape.
  */
-function resolveNativeEvidenceRefs(record: { facts: unknown[]; unsupported: unknown[] }): void {
+function resolveNativeEvidenceRefs(record: { facts: readonly unknown[]; unsupported: readonly unknown[] }): void {
   const byId = new Map<string, unknown>();
   for (const item of [...record.facts, ...record.unsupported]) {
     const entry = asRecord(item);
