@@ -1,3 +1,4 @@
+import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createFixtureProvider } from "./runtime/fixtureProvider.js";
@@ -36,7 +37,7 @@ async function runRunCommand(args: string[]): Promise<number> {
   const revision = revisionIndex === -1 ? undefined : args[revisionIndex + 1];
 
   const outIndex = args.indexOf("--out");
-  const runRoot = outIndex === -1 ? path.join(os.tmpdir(), `wabachi-run-${Date.now()}`) : args[outIndex + 1];
+  const runRoot = outIndex === -1 ? await mkdtemp(path.join(os.tmpdir(), "wabachi-run-")) : args[outIndex + 1];
 
   try {
     const { manifestPath } = await run({
