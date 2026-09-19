@@ -32,33 +32,20 @@ For an ephemeral invocation:
 npx --yes wabachi --help
 ```
 
-## Commands
+## Start here
 
-Run the registered repository-analysis providers:
+Read the [practical usage manual](./docs/USAGE.md) for repository analysis,
+provider matrices, retained outputs, and Architecture Canon workflows.
 
-```bash
-wabachi run <repository> [--revision <ref>] [--out <dir>]
-```
-
-Run the provider matrix and retain its auditable artifacts:
+Use live discovery for the installed surface:
 
 ```bash
-wabachi matrix <repository> --revision <sha> --out <dir>
+wabachi --help
+wabachi skill
 ```
 
-Validate an Architecture Canon document:
-
-```bash
-wabachi architecture validate <file>
-```
-
-Render an Architecture Canon site:
-
-```bash
-wabachi architecture render <file> --out <dir>
-```
-
-Use `wabachi --help` for the installed command surface.
+The bundled agent Skill is available at `skills/wabachi/SKILL.md`; npm
+installation ships it as documentation and does not activate a plugin.
 
 ## Analysis model
 

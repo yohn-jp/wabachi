@@ -83,6 +83,11 @@ function main() {
       : path.join(installDirectory, "node_modules", packageName);
     if (!fs.existsSync(installedPackageDirectory)) fail(`${packageName} was not installed under node_modules`);
 
+    for (const relativePath of ["docs/USAGE.md", "skills/wabachi/SKILL.md", ".codex-plugin/plugin.json"]) {
+      const bundledPath = path.join(installedPackageDirectory, relativePath);
+      if (!fs.existsSync(bundledPath)) fail(`bundled asset is missing after install: ${relativePath}`);
+    }
+
     const binTargets = packageBinTargets(installedPackageDirectory);
     if (binTargets.length === 0) fail("package.json defines no bin entries to smoke test");
 

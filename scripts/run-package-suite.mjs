@@ -29,6 +29,12 @@ function main() {
   }
   const packedFiles = packInfo.files.map((entry) => entry.path);
 
+  for (const requiredPath of ["docs/USAGE.md", "skills/wabachi/SKILL.md", ".codex-plugin/plugin.json"]) {
+    if (!packedFiles.includes(requiredPath)) {
+      throw new Error(`required bundled asset "${requiredPath}" is not included in the packed tarball`);
+    }
+  }
+
   const executableBinPaths = Object.values(
     JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).bin ?? {},
   );
