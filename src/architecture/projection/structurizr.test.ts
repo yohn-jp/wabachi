@@ -68,13 +68,17 @@ function completeDocument(reverse = false) {
         key: "structure",
         kind: "structural",
         scope: { include: [{ kind: "element", id: "orders" }] },
+        root: { kind: "element", id: "orders" },
         title: "Structure",
+        description: "Orders structure",
         presentation: { layout: "auto", direction: "lr" },
       },
       {
         key: "checkout-flow",
         kind: "dynamic",
         scope: { include: [{ kind: "flow", id: "checkout" }] },
+        root: { kind: "element", id: "orders" },
+        description: "Checkout flow",
       },
       {
         key: "production",
@@ -85,6 +89,7 @@ function completeDocument(reverse = false) {
             { kind: "deployment-node", id: "orders-node" },
           ],
         },
+        root: { kind: "runtime-environment", id: "production" },
       },
     ],
   });
@@ -106,8 +111,10 @@ test("projects validated Canon, hierarchy, relationships, flows, deployment, and
   assert.match(projection.dsl, /canon_element_orders = softwareSystem "orders"/);
   assert.match(projection.dsl, /canon_element_orders_x2d_component = container/);
   assert.match(projection.dsl, /canon_element_orders -> canon_element_payments/);
-  assert.match(projection.dsl, /dynamic \* "canon_view_checkout_x2d_flow"/);
+  assert.match(projection.dsl, /dynamic canon_element_orders "canon_view_checkout_x2d_flow"/);
+  assert.match(projection.dsl, /description "Checkout flow"/);
   assert.match(projection.dsl, /deployment \* canon_runtime_x2d_environment_production "canon_view_production"/);
+  assert.match(projection.dsl, /systemContext canon_element_orders "canon_view_structure"/);
   assert.match(projection.dsl, /softwareSystemInstance canon_element_orders/);
 
   assert.deepEqual(projection.viewMappings, [
@@ -192,4 +199,56 @@ test("refuses a Canon document that has not passed complete-document validation"
   });
 
   assert.throws(() => projectArchitectureDocumentToStructurizr(invalid), /cannot project invalid Architecture Canon/);
+});
+
+test("does not infer or substitute a declared root in a Structurizr projection", () => {
+  const document = createArchitectureDocument({
+    documentId: "unsupported-root",
+    root: { id: "architecture" },
+    elements: [
+      { id: "orders", kind: "service" },
+      { id: "store", kind: "data-store" },
+    ],
+    views: [
+      {
+        key: "unsupported",
+        kind: "structural",
+        root: { kind: "element", id: "store" },
+        scope: { include: [{ kind: "element", id: "orders" }] },
+      },
+    ],
+  });
+
+  const projection = projectArchitectureDocumentToStructurizr(document);
+
+  assert.equal(projection.dsl.includes("canon_view_unsupported"), false);
+  assert.deepEqual(
+    projection.losses
+      .filter(({ code }) => code === "unsupported-view-root")
+      .map(({ path, canonIds }) => ({ path, canonIds })),
+    [{ path: "views[0].root", canonIds: ["unsupported", "store"] }],
+  );
+});
+
+test("keeps rootless dynamic views architecture-wide instead of inferring scope from include", () => {
+  const document = createArchitectureDocument({
+    documentId: "rootless-dynamic",
+    root: { id: "architecture" },
+    elements: [{ id: "orders", kind: "service" }],
+    views: [
+      {
+        key: "dynamic",
+        kind: "dynamic",
+        scope: { include: [{ kind: "element", id: "orders" }] },
+      },
+    ],
+  });
+
+  const projection = projectArchitectureDocumentToStructurizr(document);
+
+  assert.match(projection.dsl, /dynamic \* "canon_view_dynamic"/);
+  assert.equal(
+    projection.losses.some(({ code }) => code === "unsupported-view-root"),
+    false,
+  );
 });

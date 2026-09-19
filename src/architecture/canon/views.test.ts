@@ -28,6 +28,8 @@ test("normalizes structural, dynamic, and deployment views without resolving Can
         exclude: [{ kind: "element", id: "service-c" }],
       },
       title: "  Context view  ",
+      description: "  Context description  ",
+      root: { kind: "element", id: "service-b" },
       presentation: { direction: " left-to-right " },
     },
     {
@@ -51,6 +53,8 @@ test("normalizes structural, dynamic, and deployment views without resolving Can
     { kind: "relationship", id: "relationship-b" },
   ]);
   assert.equal(context?.title, "Context view");
+  assert.equal(context?.description, "Context description");
+  assert.deepEqual(context?.root, { kind: "element", id: "service-b" });
   assert.deepEqual(context?.presentation, { direction: "left-to-right" });
   assert.equal(views.find((view) => view.key === "flow")?.scope.include[0]?.id, "checkout-flow");
   assert.equal(Object.isFrozen(views), true);
@@ -110,6 +114,8 @@ test("normalizes equivalent identity and hint spellings deterministically", () =
       scope: {
         include: [{ kind: "element", id: "e\u0301lement" }],
       },
+      root: { kind: "element", id: "e\u0301lement" },
+      description: "  description  ",
       presentation: { layout: "  hierarchical  " },
     },
   ]);
@@ -120,6 +126,8 @@ test("normalizes equivalent identity and hint spellings deterministically", () =
       scope: {
         include: [{ kind: "element", id: "élement" }],
       },
+      root: { kind: "element", id: "élement" },
+      description: "description",
       presentation: { layout: "hierarchical" },
     },
   ]);

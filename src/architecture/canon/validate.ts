@@ -41,6 +41,7 @@ export const ARCHITECTURE_DIAGNOSTIC_CODES = [
   "invalid-decision-reference",
   "invalid-supersession",
   "invalid-view-reference",
+  "invalid-view-root",
 ] as const;
 
 export type ArchitectureDiagnosticCode = (typeof ARCHITECTURE_DIAGNOSTIC_CODES)[number];
@@ -709,6 +710,47 @@ function validateViewReference(
 function validateViews(document: ArchitectureDocumentV1, index: CanonIndex, diagnostics: DiagnosticCollector): void {
   for (let viewIndex = 0; viewIndex < document.views.length; viewIndex += 1) {
     const view = document.views[viewIndex];
+    if (view.root !== undefined) {
+      const path = `views[${viewIndex}].root`;
+      if (view.root.kind === "element") {
+        if (!index.elementIds.has(view.root.id)) {
+          diagnostics.add("invalid-view-root", path, `view root references an unknown element: ${view.root.id}`);
+        } else if (view.kind === "deployment") {
+          diagnostics.add(
+            "invalid-view-root",
+            path,
+            `deployment view root must reference a runtime environment, not element ${view.root.id}`,
+          );
+        }
+      } else if (view.root.kind === "runtime-environment") {
+        if (!index.runtimeEnvironmentIds.has(view.root.id)) {
+          diagnostics.add(
+            "invalid-view-root",
+            path,
+            `view root references an unknown runtime environment: ${view.root.id}`,
+          );
+        } else if (view.kind !== "deployment") {
+          diagnostics.add(
+            "invalid-view-root",
+            path,
+            `${view.kind} view root must reference an element, not runtime environment ${view.root.id}`,
+          );
+        }
+      } else {
+        diagnostics.add("invalid-view-root", path, `${view.kind} view root kind is incompatible: ${view.root.kind}`);
+      }
+
+      for (let referenceIndex = 0; referenceIndex < view.scope.exclude.length; referenceIndex += 1) {
+        const reference = view.scope.exclude[referenceIndex];
+        if (reference.kind === view.root.kind && reference.id === view.root.id) {
+          diagnostics.add(
+            "invalid-view-root",
+            `views[${viewIndex}].scope.exclude[${referenceIndex}]`,
+            `view root cannot be excluded: ${view.root.kind} ${view.root.id}`,
+          );
+        }
+      }
+    }
     for (let referenceIndex = 0; referenceIndex < view.scope.include.length; referenceIndex += 1) {
       const reference = view.scope.include[referenceIndex];
       validateViewReference(

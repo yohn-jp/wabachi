@@ -123,11 +123,7 @@ function referenceAttachmentEntry(
 
 function viewEntry(view: ArchitectureDocumentV1["views"][number]): DocumentationEntry {
   const references = [...view.scope.include, ...view.scope.exclude];
-  return createEntry(
-    view.key,
-    view,
-    references.map((reference) => reference.id),
-  );
+  return createEntry(view.key, view, [view.root?.id, ...references.map((reference) => reference.id)]);
 }
 
 function createSections(document: ArchitectureDocumentV1): readonly DocumentationSection[] {

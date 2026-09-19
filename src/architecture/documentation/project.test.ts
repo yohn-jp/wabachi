@@ -79,8 +79,20 @@ function createCompleteDocument(reverse = false) {
       referenceAttachments: [{ targetId: "orders", referenceIds: ["orders-design"] }],
     },
     views: [
-      { key: "structure", kind: "structural", scope: { include: [{ kind: "element", id: "orders" }] } },
-      { key: "flow", kind: "dynamic", scope: { include: [{ kind: "flow", id: "checkout-flow" }] } },
+      {
+        key: "structure",
+        kind: "structural",
+        scope: { include: [{ kind: "element", id: "orders" }] },
+        root: { kind: "element", id: "orders" },
+        description: "Orders structure",
+      },
+      {
+        key: "flow",
+        kind: "dynamic",
+        scope: { include: [{ kind: "flow", id: "checkout-flow" }] },
+        root: { kind: "element", id: "orders" },
+        description: "Checkout flow",
+      },
       {
         key: "deployment",
         kind: "deployment",
@@ -91,6 +103,7 @@ function createCompleteDocument(reverse = false) {
             { kind: "infrastructure-reference", id: "production-cluster" },
           ],
         },
+        root: { kind: "runtime-environment", id: "production" },
       },
     ],
   });
@@ -170,6 +183,9 @@ test("projects all v1 Canon categories into deterministic anchored documentation
     group(model, "views", "views").entries.map((entry) => entry.data),
     document.views,
   );
+  assert.deepEqual(group(model, "views", "views").entries.find((entry) => entry.key === "structure")?.anchors, [
+    { canonId: "orders" },
+  ]);
   assert.equal("html" in model, false);
   assert.equal("structurizr" in model, false);
   assert.equal(Object.isFrozen(model), true);

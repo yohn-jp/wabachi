@@ -536,18 +536,22 @@ function readView(value: unknown): JsonRecord {
   const record = readRecord(
     value,
     "view",
-    ["key", "kind", "scope", "order", "title", "presentation"],
+    ["key", "kind", "scope", "root", "order", "title", "description", "presentation"],
     ["key", "kind", "scope"],
   );
+  const root = Object.hasOwn(record, "root") ? readViewReference(record.root) : undefined;
   const order = readOptionalNumber(record, "order", "view");
   const title = readOptionalString(record, "title", "view");
+  const description = readOptionalString(record, "description", "view");
   const presentation = Object.hasOwn(record, "presentation") ? readPresentation(record.presentation) : undefined;
   return {
     key: readRequiredString(record, "key", "view"),
     kind: readRequiredString(record, "kind", "view"),
     scope: readViewScope(record.scope),
+    ...(root === undefined ? {} : { root }),
     ...(order === undefined ? {} : { order }),
     ...(title === undefined ? {} : { title }),
+    ...(description === undefined ? {} : { description }),
     ...(presentation === undefined ? {} : { presentation }),
   };
 }
