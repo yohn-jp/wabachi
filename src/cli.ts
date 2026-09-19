@@ -68,7 +68,7 @@ async function runMatrixCommand(args: string[]): Promise<number> {
       configuredProviderIds = config.providers;
       configuredAdditionOrder = config.additionOrder;
     }
-    if (source === undefined) throw new Error("usage: PACKAGE_NAME matrix <repository> --revision <sha> --out <dir>");
+    if (source === undefined) throw new Error("usage: wabachi matrix <repository> --revision <sha> --out <dir>");
     if (revision === undefined) throw new Error("matrix requires --revision <40-character commit SHA>");
     const runRoot = outIndex === -1 ? undefined : args[outIndex + 1];
     if (runRoot === undefined) throw new Error("matrix requires --out <dir> so artifacts are retained");
@@ -111,7 +111,7 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
 async function runRunCommand(args: string[]): Promise<number> {
   const source = args[0];
   if (source === undefined) {
-    console.error("usage: PACKAGE_NAME run <repository> [--revision <ref>] [--out <dir>]");
+    console.error("usage: wabachi run <repository> [--revision <ref>] [--out <dir>]");
     return 1;
   }
 
@@ -144,7 +144,7 @@ async function runRunCommand(args: string[]): Promise<number> {
 function printHelp(): void {
   console.log(
     [
-      "Usage: PACKAGE_NAME <command> [options]",
+      "Usage: wabachi <command> [options]",
       "",
       "Commands:",
       "  run <repository>   Resolve a repository/revision and execute registered providers",
@@ -158,6 +158,5 @@ function printHelp(): void {
 }
 
 function getVersion(): string {
-  // TODO: replace with real package metadata (see docs on version wiring).
-  return "0.0.1";
+  return "0.1.0";
 }

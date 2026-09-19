@@ -1,10 +1,10 @@
 {
-  "name": "@OWNER/PACKAGE_NAME",
-  "version": "0.0.1",
-  "description": "TODO: one-line description",
+  "name": "wabachi",
+  "version": "0.1.0",
+  "description": "Repository analysis and Architecture Canon tooling for deterministic codebase understanding.",
   "type": "module",
   "bin": {
-    "PACKAGE_NAME": "dist/index.js"
+    "wabachi": "dist/index.js"
   },
   "files": [
     "dist",
@@ -44,16 +44,29 @@
   "packageManager": "pnpm@11.18.0",
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "executableFiles": [
+      "dist/index.js"
+    ]
   },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OWNER/REPO_NAME.git"
+    "url": "git+https://github.com/yohn-jp/wabachi.git"
   },
-  "homepage": "https://github.com/OWNER/REPO_NAME#readme",
+  "homepage": "https://github.com/yohn-jp/wabachi#readme",
   "bugs": {
-    "url": "https://github.com/OWNER/REPO_NAME/issues"
+    "url": "https://github.com/yohn-jp/wabachi/issues"
   },
-  "keywords": []
+  "keywords": [
+    "architecture",
+    "codebase",
+    "repository-analysis",
+    "scip",
+    "typescript",
+    "developer-tools",
+    "ai-agents"
+  ],
+  "main": "dist/index.js",
+  "types": "./dist/index.d.ts"
 }
