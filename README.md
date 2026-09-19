@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="./docs/assets/readme/wabachi-hero.webp" alt="WABACHI — Repository Semantic Authority." width="100%">
+</p>
+
+<p align="center">
   <a href="https://github.com/yohn-jp/wabachi/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/yohn-jp/wabachi/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://www.npmjs.com/package/wabachi"><img alt="npm" src="https://img.shields.io/npm/v/wabachi"></a>
   <a href="https://www.npmjs.com/package/wabachi"><img alt="Node" src="https://img.shields.io/node/v/wabachi"></a>
