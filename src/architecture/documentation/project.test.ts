@@ -12,6 +12,14 @@ function createCompleteDocument(reverse = false) {
     documentId: "document",
     root: { id: "architecture" },
     elements: ordered([
+      {
+        id: "customer",
+        kind: "actor" as const,
+        displayName: "Customer",
+        technology: "Browser",
+        tags: ordered(["external", "person"]),
+        properties: reverse ? { region: "global", channel: "web" } : { channel: "web", region: "global" },
+      },
       { id: "orders", kind: "service" as const },
       { id: "payments", kind: "service" as const },
       { id: "store", kind: "data-store" as const },
@@ -125,9 +133,16 @@ test("projects all v1 Canon categories into deterministic anchored documentation
   ]);
   assert.deepEqual(model.root, { canonId: "architecture" });
   assert.deepEqual(group(model, "structure", "elements").entries[0], {
-    key: "orders",
-    anchors: [{ canonId: "orders" }],
-    data: { id: "orders", kind: "service" },
+    key: "customer",
+    anchors: [{ canonId: "customer" }],
+    data: {
+      id: "customer",
+      kind: "actor",
+      displayName: "Customer",
+      technology: "Browser",
+      tags: ["external", "person"],
+      properties: { channel: "web", region: "global" },
+    },
   });
   assert.deepEqual(
     group(model, "structure", "relationships").entries.map((entry) => entry.data),

@@ -3,20 +3,30 @@ import test from "node:test";
 
 import { createElement, normalizeElements, validateContainment } from "./elements.js";
 
-test("creates canonical element records without display-name identity", () => {
+test("creates annotated actor records without changing id identity", () => {
   const first = createElement({
     id: "orders",
-    kind: "service",
+    kind: "actor",
     displayName: "Orders",
+    technology: " Web ",
+    tags: ["customer", "external"],
+    properties: { region: "global", channel: "web" },
   });
   const second = createElement({
     id: "orders",
-    kind: "service",
+    kind: "actor",
     displayName: "Order Processing",
   });
 
-  assert.deepEqual(first, second);
-  assert.deepEqual(first, { id: "orders", kind: "service" });
+  assert.equal(first.id, second.id);
+  assert.deepEqual(first, {
+    id: "orders",
+    kind: "actor",
+    displayName: "Orders",
+    technology: "Web",
+    tags: ["customer", "external"],
+    properties: { channel: "web", region: "global" },
+  });
 });
 
 test("normalizes representative nested containment deterministically", () => {
@@ -83,4 +93,37 @@ test("rejects unsupported element kinds and validates canonical records", () => 
     { id: "component", kind: "component", parentId: "service" },
   ]);
   assert.doesNotThrow(() => validateContainment(elements));
+});
+
+test("normalizes annotations deterministically and rejects malformed or duplicate declarations", () => {
+  const first = createElement({
+    id: "customer",
+    kind: "actor",
+    tags: ["beta", "alpha"],
+    properties: { zeta: "last", alpha: "first" },
+  });
+  const second = createElement({
+    id: "customer",
+    kind: "actor",
+    tags: ["alpha", "beta"],
+    properties: { alpha: "first", zeta: "last" },
+  });
+  assert.deepEqual(first, second);
+  assert.ok(Object.isFrozen(first.tags));
+  assert.ok(Object.isFrozen(first.properties));
+
+  assert.throws(() => createElement({ id: "x", kind: "actor", tags: ["tag", " tag "] }), /duplicate element tag/);
+  assert.throws(
+    () => createElement({ id: "x", kind: "actor", properties: { "e\u0301": "a", "\u00e9": "b" } }),
+    /duplicate element property/,
+  );
+  assert.throws(() => createElement({ id: "x", kind: "actor", tags: [""] }), /element tag is malformed/);
+  assert.throws(
+    () => createElement({ id: "x", kind: "actor", properties: new Date() as never }),
+    /element properties must be a plain object/,
+  );
+  assert.throws(
+    () => createElement({ id: "x", kind: "actor", properties: { valid: 1 as never } }),
+    /element property valid must be a string/,
+  );
 });

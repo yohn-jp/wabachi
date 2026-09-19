@@ -11,6 +11,14 @@ function completeDocument(reverse = false) {
     documentId: "commerce",
     root: { id: "architecture" },
     elements: ordered([
+      {
+        id: "customer",
+        kind: "actor" as const,
+        displayName: "Customer",
+        technology: "Browser",
+        tags: ordered(["external", "person"]),
+        properties: reverse ? { region: "global", channel: "web" } : { channel: "web", region: "global" },
+      },
       { id: "orders", kind: "service" as const },
       { id: "orders-component", kind: "component" as const, parentId: "orders" },
       { id: "payments", kind: "service" as const },
@@ -91,6 +99,10 @@ test("projects validated Canon, hierarchy, relationships, flows, deployment, and
   const projection = projectArchitectureDocumentToStructurizr(completeDocument());
 
   assert.match(projection.dsl, /workspace "commerce"/);
+  assert.match(projection.dsl, /canon_element_customer = person "Customer"/);
+  assert.match(projection.dsl, /tags "CanonElement,CanonKind-actor,external,person"/);
+  assert.match(projection.dsl, /"canon\.technology" "Browser"/);
+  assert.match(projection.dsl, /"channel" "web"/);
   assert.match(projection.dsl, /canon_element_orders = softwareSystem "orders"/);
   assert.match(projection.dsl, /canon_element_orders_x2d_component = container/);
   assert.match(projection.dsl, /canon_element_orders -> canon_element_payments/);
@@ -118,6 +130,30 @@ test("projects validated Canon, hierarchy, relationships, flows, deployment, and
   assert.equal(
     projection.losses.some(({ code }) => code === "unsupported-deployment-mapping"),
     false,
+  );
+});
+
+test("reports element annotations that Structurizr cannot represent losslessly", () => {
+  const document = createArchitectureDocument({
+    documentId: "annotations",
+    root: { id: "architecture" },
+    elements: [
+      {
+        id: "customer",
+        kind: "actor",
+        technology: "Browser",
+        tags: ["comma,tag"],
+        properties: { "canon.technology": "custom" },
+      },
+    ],
+  });
+  const projection = projectArchitectureDocumentToStructurizr(document);
+  assert.deepEqual(
+    projection.losses.map(({ code, path }) => ({ code, path })),
+    [
+      { code: "unsupported-element-annotation", path: "elements[0].tags[0]" },
+      { code: "unsupported-element-annotation", path: "elements[0].technology" },
+    ],
   );
 });
 

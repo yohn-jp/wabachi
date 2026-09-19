@@ -19,6 +19,7 @@ export const PROJECTION_LOSS_CODES = [
   "unsupported-reference",
   "unsupported-reference-attachment",
   "unsupported-interface",
+  "unsupported-element-annotation",
   "unsupported-containment",
   "unsupported-flow",
   "unsupported-deployment-instance",
@@ -77,7 +78,7 @@ export interface StructurizrProjection {
   readonly losses: readonly ProjectionLoss[];
 }
 
-type ElementDslKind = "softwareSystem" | "container" | "component" | "element";
+type ElementDslKind = "person" | "softwareSystem" | "container" | "component" | "element";
 
 interface RelationshipEntry {
   readonly record: RelationshipRecord;
@@ -275,6 +276,7 @@ function elementTag(element: ElementRecord): string {
 }
 
 function childKind(parent: ElementDslKind, element: ElementRecord): ElementDslKind {
+  if (parent === "person") return "element";
   if (parent === "softwareSystem") return "container";
   if (parent === "container") return "component";
   if (parent === "component" || parent === "element") return "element";
@@ -282,6 +284,7 @@ function childKind(parent: ElementDslKind, element: ElementRecord): ElementDslKi
 }
 
 function rootKind(element: ElementRecord): ElementDslKind {
+  if (element.kind === "actor") return "person";
   return element.kind === "system" || element.kind === "service" ? "softwareSystem" : "element";
 }
 
@@ -308,8 +311,41 @@ function renderElement(
   const isUnnested = element.parentId !== undefined && kind === "element";
   const declarationIndent = isUnnested ? 2 : indent;
   const identifier = context.elementIdentifiers.get(element.id) as string;
-  const lines = [`${"    ".repeat(declarationIndent)}${identifier} = ${kind} ${quote(element.id)} {`];
-  lines.push(`${"    ".repeat(declarationIndent + 1)}tags ${quote(elementTag(element))}`);
+  const name = element.displayName ?? element.id;
+  const lines = [`${"    ".repeat(declarationIndent)}${identifier} = ${kind} ${quote(name)} {`];
+  const elementIndex = context.document.elements.findIndex((candidate) => candidate.id === element.id);
+  const tags = [elementTag(element)];
+  for (let tagIndex = 0; tagIndex < (element.tags?.length ?? 0); tagIndex += 1) {
+    const tag = element.tags?.[tagIndex] as string;
+    if (tag.includes(",")) {
+      context.losses.add(
+        "unsupported-element-annotation",
+        `elements[${elementIndex}].tags[${tagIndex}]`,
+        [element.id],
+        `Structurizr cannot preserve Canon element tag containing a comma: ${tag}`,
+      );
+    } else tags.push(tag);
+  }
+  lines.push(`${"    ".repeat(declarationIndent + 1)}tags ${quote(tags.join(","))}`);
+
+  const properties = Object.entries(element.properties ?? {});
+  if (element.technology !== undefined) {
+    if (Object.hasOwn(element.properties ?? {}, "canon.technology")) {
+      context.losses.add(
+        "unsupported-element-annotation",
+        `elements[${elementIndex}].technology`,
+        [element.id],
+        "Structurizr property canon.technology conflicts with the Canon element technology annotation",
+      );
+    } else properties.unshift(["canon.technology", element.technology]);
+  }
+  if (properties.length > 0) {
+    lines.push(`${"    ".repeat(declarationIndent + 1)}properties {`);
+    for (const [key, value] of properties) {
+      lines.push(`${"    ".repeat(declarationIndent + 2)}${quote(key)} ${quote(value)}`);
+    }
+    lines.push(`${"    ".repeat(declarationIndent + 1)}}`);
+  }
 
   const unnestedChildren: ElementRecord[] = [];
   if (kind !== "element") {
