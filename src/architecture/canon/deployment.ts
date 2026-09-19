@@ -138,8 +138,14 @@ function asInfrastructureReferenceId(value: unknown): InfrastructureReferenceId 
   return normalizeDeploymentId(value, "infrastructure reference id") as InfrastructureReferenceId;
 }
 
+function compareOrdinal(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
 function sortById<T extends { readonly id: string }>(records: readonly T[]): T[] {
-  return [...records].sort((left, right) => left.id.localeCompare(right.id));
+  return [...records].sort((left, right) => compareOrdinal(left.id, right.id));
 }
 
 function rejectDuplicateIds(records: readonly { readonly id: string }[], label: string): void {
@@ -285,9 +291,9 @@ export function createDeploymentTopology(input: DeploymentTopologyInput): Deploy
     infrastructureReferences: freezeArray(sortById(infrastructureReferences)),
     mappings: freezeArray(
       [...mappings].sort((left, right) => {
-        const softwareOrder = left.softwareElementId.localeCompare(right.softwareElementId);
+        const softwareOrder = compareOrdinal(left.softwareElementId, right.softwareElementId);
         if (softwareOrder !== 0) return softwareOrder;
-        return left.deploymentInstanceId.localeCompare(right.deploymentInstanceId);
+        return compareOrdinal(left.deploymentInstanceId, right.deploymentInstanceId);
       }),
     ),
   });
