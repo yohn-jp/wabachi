@@ -15,6 +15,14 @@ function createCompleteDocument() {
     root: { id: "architecture" },
     elements: [
       { id: "payments", kind: "service" },
+      {
+        id: "customer",
+        kind: "actor",
+        displayName: "Customer",
+        technology: "Browser",
+        tags: ["external", "person"],
+        properties: { region: "global", channel: "web" },
+      },
       { id: "orders", kind: "service" },
     ],
     interfaces: [{ id: "orders-api", owner: "orders", protocol: "https" }],
@@ -90,7 +98,7 @@ test("decodes and round-trips a complete validated v1 document", () => {
   const decoded = decodeArchitectureDocument(parsed(encoded));
 
   assert.deepEqual(decoded, document);
-  assert.equal(parseCanonicalArchitectureDocument(encoded).globalIdentityRegistry.entries.length, 9);
+  assert.equal(parseCanonicalArchitectureDocument(encoded).globalIdentityRegistry.entries.length, 10);
   assert.equal(Object.keys(parsed(encoded)).at(-1), "globalIdentityRegistry");
 });
 
@@ -139,4 +147,28 @@ test("fails closed for unsupported versions, unknown fields, invalid references,
 test("rejects malformed JSON text at the codec boundary", () => {
   assert.throws(() => parseCanonicalArchitectureDocument("{}"), /missing required field/);
   assert.throws(() => parseCanonicalArchitectureDocument("not json"), /invalid canonical/);
+});
+
+test("strictly decodes actor annotations and rejects malformed annotation fields", () => {
+  const value = parsed(encodeCanonicalJson(createCompleteDocument()));
+  const decoded = decodeArchitectureDocument(value);
+  assert.deepEqual(
+    decoded.elements.find(({ id }) => id === "customer"),
+    {
+      id: "customer",
+      kind: "actor",
+      displayName: "Customer",
+      technology: "Browser",
+      tags: ["external", "person"],
+      properties: { channel: "web", region: "global" },
+    },
+  );
+
+  const malformedTags = structuredClone(value);
+  (malformedTags.elements as Array<Record<string, unknown>>)[0].tags = ["valid", 1];
+  assert.throws(() => decodeArchitectureDocument(malformedTags), /element tags must contain strings/);
+
+  const malformedProperties = structuredClone(value);
+  (malformedProperties.elements as Array<Record<string, unknown>>)[0].properties = { key: 1 };
+  assert.throws(() => decodeArchitectureDocument(malformedProperties), /string values/);
 });

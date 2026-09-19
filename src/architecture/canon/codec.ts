@@ -138,11 +138,36 @@ function readRoot(value: unknown): { readonly id: string } {
 }
 
 function readElement(value: unknown): JsonRecord {
-  const record = readRecord(value, "element", ["id", "kind", "parentId"], ["id", "kind"]);
+  const record = readRecord(
+    value,
+    "element",
+    ["id", "kind", "displayName", "technology", "tags", "properties", "parentId"],
+    ["id", "kind"],
+  );
+  const displayName = readOptionalString(record, "displayName", "element");
+  const technology = readOptionalString(record, "technology", "element");
+  const tags = Object.hasOwn(record, "tags")
+    ? readArray(record.tags, "element tags").map((tag) => {
+        if (typeof tag !== "string") throw new TypeError("element tags must contain strings");
+        return tag;
+      })
+    : undefined;
+  const properties = Object.hasOwn(record, "properties")
+    ? Object.fromEntries(
+        Object.entries(assertRecord(record.properties, "element properties")).map(([key, propertyValue]) => {
+          if (typeof propertyValue !== "string") throw new TypeError("element properties must contain string values");
+          return [key, propertyValue];
+        }),
+      )
+    : undefined;
   const parentId = readOptionalString(record, "parentId", "element");
   return {
     id: readRequiredString(record, "id", "element"),
     kind: readRequiredString(record, "kind", "element"),
+    ...(displayName === undefined ? {} : { displayName }),
+    ...(technology === undefined ? {} : { technology }),
+    ...(tags === undefined ? {} : { tags }),
+    ...(properties === undefined ? {} : { properties }),
     ...(parentId === undefined ? {} : { parentId }),
   };
 }
