@@ -14,7 +14,22 @@ test("--help exits 0 and prints usage", async () => {
   try {
     const exitCode = await runCli(["--help"]);
     assert.equal(exitCode, 0);
-    assert.match(lines.join("\n"), /Usage:/);
+    const output = lines.join("\n");
+    assert.match(output, /Usage: wabachi/);
+    assert.doesNotMatch(output, /PACKAGE_NAME/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test("--version reports package version", async () => {
+  const originalLog = console.log;
+  const lines: string[] = [];
+  console.log = (line: string) => lines.push(line);
+  try {
+    const exitCode = await runCli(["--version"]);
+    assert.equal(exitCode, 0);
+    assert.deepEqual(lines, ["0.1.0"]);
   } finally {
     console.log = originalLog;
   }
