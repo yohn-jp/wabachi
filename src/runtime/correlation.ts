@@ -823,9 +823,7 @@ function toCanonicalEntity(
   const members = group.indices.map((index) => toCanonicalMember(entities[index])).sort(compareMembers);
   const groupIndices = new Set(group.indices);
   const incidentEdges = uniqueEdges(group.indices.flatMap((index) => edgeIndex.incident.get(index) ?? []));
-  const internalEdges = incidentEdges.filter(
-    (edge) => groupIndices.has(edge.left) && groupIndices.has(edge.right),
-  );
+  const internalEdges = incidentEdges.filter((edge) => groupIndices.has(edge.left) && groupIndices.has(edge.right));
   const candidateCanonicalIds = uniqueSorted(
     incidentEdges
       .flatMap((edge) => {
