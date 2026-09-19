@@ -15,5 +15,5 @@ for (const relativeTarget of Object.values(bin)) {
   const target = path.join(repoRoot, relativeTarget);
   const stat = fs.statSync(target);
   fs.chmodSync(target, stat.mode | 0o111);
-  console.log(`chmod +x ${relativeTarget}`);
+  console.error(`chmod +x ${relativeTarget}`);
 }

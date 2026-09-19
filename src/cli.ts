@@ -7,6 +7,7 @@ import { run } from "./runtime/run.js";
 import { createScipTypescriptProvider } from "./runtime/scipProvider.js";
 import { createTypeScriptProvider } from "./runtime/typescriptProvider.js";
 import { runProviderMatrix } from "./runtime/workflow.js";
+import { runArchitectureCli } from "./architecture/cli.js";
 
 export async function runCli(argv: string[]): Promise<number> {
   const command = argv[0];
@@ -27,6 +28,10 @@ export async function runCli(argv: string[]): Promise<number> {
 
   if (command === "matrix") {
     return runMatrixCommand(argv.slice(1));
+  }
+
+  if (command === "architecture") {
+    return runArchitectureCli(argv.slice(1));
   }
 
   console.error(`unknown command: ${command}`);
@@ -144,6 +149,8 @@ function printHelp(): void {
       "Commands:",
       "  run <repository>   Resolve a repository/revision and execute registered providers",
       "  matrix <repository>  Run providers and generate auditable facts, correlation, matrix, and report",
+      "  architecture validate <file>  Validate an explicit Architecture Canon file",
+      "  architecture render <file> --out <dir>  Render an explicit Architecture Canon site",
       "  --help              Show this help",
       "  --version           Print the installed version",
     ].join("\n"),

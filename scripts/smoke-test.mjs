@@ -58,7 +58,11 @@ function main() {
     // Verifies the dist produced by the build step, not a re-built one:
     // prepack's implicit rebuild is intentionally not relied on here.
     const packResult = run("npm", ["pack", "--json", "--ignore-scripts"], { cwd: repoRoot });
-    const [packInfo] = JSON.parse(packResult.stdout);
+    const packReport = JSON.parse(packResult.stdout);
+    const packInfo = Array.isArray(packReport) ? packReport[0] : Object.values(packReport)[0];
+    if (packInfo === undefined || typeof packInfo.filename !== "string") {
+      fail("npm pack --json returned no package archive report");
+    }
     tarballPath = path.join(repoRoot, packInfo.filename);
     ownsTarball = true;
   }
