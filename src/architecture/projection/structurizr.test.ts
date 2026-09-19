@@ -111,10 +111,10 @@ test("projects validated Canon, hierarchy, relationships, flows, deployment, and
   assert.match(projection.dsl, /canon_element_orders = softwareSystem "orders"/);
   assert.match(projection.dsl, /canon_element_orders_x2d_component = container/);
   assert.match(projection.dsl, /canon_element_orders -> canon_element_payments/);
-  assert.match(projection.dsl, /dynamic canon_element_orders "canon_view_checkout_x2d_flow"/);
+  assert.match(projection.dsl, /dynamic canon_element_orders canon_view_checkout_x2d_flow/);
   assert.match(projection.dsl, /description "Checkout flow"/);
-  assert.match(projection.dsl, /deployment \* canon_runtime_x2d_environment_production "canon_view_production"/);
-  assert.match(projection.dsl, /systemContext canon_element_orders "canon_view_structure"/);
+  assert.match(projection.dsl, /deployment \* canon_runtime_x2d_environment_production canon_view_production/);
+  assert.match(projection.dsl, /systemContext canon_element_orders canon_view_structure/);
   assert.match(projection.dsl, /softwareSystemInstance canon_element_orders/);
 
   assert.deepEqual(projection.viewMappings, [
@@ -137,6 +137,34 @@ test("projects validated Canon, hierarchy, relationships, flows, deployment, and
   assert.equal(
     projection.losses.some(({ code }) => code === "unsupported-deployment-mapping"),
     false,
+  );
+});
+
+test("omits Structurizr-incompatible containment relationships with an explicit projection loss", () => {
+  const projection = projectArchitectureDocumentToStructurizr(
+    createArchitectureDocument({
+      documentId: "containment-relationship",
+      root: { id: "architecture" },
+      elements: [
+        { id: "orders", kind: "service" },
+        { id: "orders-component", kind: "component", parentId: "orders" },
+      ],
+      relationships: [{ source: "orders-component", target: "orders", kind: "calls" }],
+    }),
+  );
+
+  assert.equal(projection.dsl.includes("canon_element_orders_x2d_component -> canon_element_orders"), false);
+  assert.deepEqual(
+    projection.losses.filter(({ code }) => code === "unsupported-relationship"),
+    [
+      {
+        code: "unsupported-relationship",
+        path: "relationships[0]",
+        canonIds: ["orders-component", "orders"],
+        message:
+          "Structurizr cannot represent a relationship between a Canon element and its containment parent: orders-component -> orders",
+      },
+    ],
   );
 });
 
@@ -246,7 +274,7 @@ test("keeps rootless dynamic views architecture-wide instead of inferring scope 
 
   const projection = projectArchitectureDocumentToStructurizr(document);
 
-  assert.match(projection.dsl, /dynamic \* "canon_view_dynamic"/);
+  assert.match(projection.dsl, /dynamic \* canon_view_dynamic/);
   assert.equal(
     projection.losses.some(({ code }) => code === "unsupported-view-root"),
     false,
