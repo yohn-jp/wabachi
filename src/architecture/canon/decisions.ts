@@ -91,8 +91,14 @@ function normalizeCanonId(value: unknown, label: string): string {
   }
 }
 
+function compareCanonical(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
 function sortStrings(values: readonly string[]): readonly string[] {
-  return [...values].sort((left, right) => left.localeCompare(right));
+  return [...values].sort(compareCanonical);
 }
 
 function uniqueSortedIds(values: readonly unknown[], label: string): readonly string[] {
@@ -250,11 +256,13 @@ export function createArchitectureDecisions(input: ArchitectureDecisionsInput = 
   assertStringArray(rawReferences, "references");
   assertStringArray(rawAttachments, "referenceAttachments");
 
-  const decisions = [...rawDecisions].map(normalizeDecision).sort((left, right) => left.id.localeCompare(right.id));
-  const references = [...rawReferences].map(normalizeReference).sort((left, right) => left.id.localeCompare(right.id));
+  const decisions = [...rawDecisions].map(normalizeDecision).sort((left, right) => compareCanonical(left.id, right.id));
+  const references = [...rawReferences]
+    .map(normalizeReference)
+    .sort((left, right) => compareCanonical(left.id, right.id));
   const referenceAttachments = [...rawAttachments]
     .map(normalizeAttachment)
-    .sort((left, right) => left.targetId.localeCompare(right.targetId));
+    .sort((left, right) => compareCanonical(left.targetId, right.targetId));
 
   assertUniqueIds(decisions, "decision id");
   assertUniqueIds(references, "reference id");
