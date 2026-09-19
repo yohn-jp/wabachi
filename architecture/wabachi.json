@@ -1,0 +1,858 @@
+{
+  "canonVersion": 1,
+  "documentId": "wabachi-architecture-v1",
+  "root": {
+    "kind": "architecture",
+    "id": "wabachi"
+  },
+  "elements": [
+    { "id": "analysis-command", "kind": "service", "parentId": "wabachi-cli" },
+    { "id": "analysis-runtime", "kind": "system" },
+    { "id": "architecture-command", "kind": "service", "parentId": "wabachi-cli" },
+    { "id": "architecture-documentation", "kind": "system" },
+    {
+      "id": "architecture-export-adapter",
+      "kind": "component",
+      "parentId": "static-site"
+    },
+    { "id": "canon-service", "kind": "service", "parentId": "architecture-documentation" },
+    { "id": "correlation-engine", "kind": "component", "parentId": "provider-workflow" },
+    {
+      "id": "documentation-projection",
+      "kind": "service",
+      "parentId": "architecture-documentation"
+    },
+    { "id": "graft-provider", "kind": "component", "parentId": "provider-workflow" },
+    {
+      "id": "observation-normalization",
+      "kind": "component",
+      "parentId": "provider-workflow"
+    },
+    { "id": "provider-matrix", "kind": "component", "parentId": "provider-workflow" },
+    { "id": "provider-workflow", "kind": "service", "parentId": "analysis-runtime" },
+    { "id": "repository-input", "kind": "external-system" },
+    { "id": "repository-resolution", "kind": "service", "parentId": "analysis-runtime" },
+    { "id": "run-manifest", "kind": "component", "parentId": "provider-workflow" },
+    { "id": "scip-provider", "kind": "component", "parentId": "provider-workflow" },
+    { "id": "static-site", "kind": "service", "parentId": "architecture-documentation" },
+    {
+      "id": "structurizr-projection",
+      "kind": "service",
+      "parentId": "architecture-documentation"
+    },
+    { "id": "structurizr-vnext", "kind": "external-system" },
+    { "id": "typescript-provider", "kind": "component", "parentId": "provider-workflow" },
+    { "id": "wabachi-cli", "kind": "system" }
+  ],
+  "interfaces": [
+    {
+      "id": "cli-run",
+      "owner": "analysis-command",
+      "protocol": "CLI",
+      "technology": "Node.js"
+    },
+    {
+      "id": "architecture-canon-input",
+      "owner": "canon-service",
+      "protocol": "JSON file",
+      "technology": "Architecture Canon v1"
+    },
+    {
+      "id": "architecture-render",
+      "owner": "static-site",
+      "protocol": "CLI",
+      "technology": "Node.js"
+    },
+    {
+      "id": "correlation-matrix-input",
+      "owner": "provider-matrix",
+      "protocol": "JSON artifacts",
+      "technology": "normalized facts and correlation"
+    },
+    {
+      "id": "documentation-projection-input",
+      "owner": "documentation-projection",
+      "protocol": "in-process API",
+      "technology": "renderer-neutral documentation model"
+    },
+    {
+      "id": "documentation-site",
+      "owner": "static-site",
+      "protocol": "filesystem",
+      "technology": "HTML and site artifacts"
+    },
+    {
+      "id": "graft-observation",
+      "owner": "provider-workflow",
+      "protocol": "JSON",
+      "technology": "observation envelope v1"
+    },
+    {
+      "id": "provider-graft-contract",
+      "owner": "graft-provider",
+      "protocol": "Provider interface",
+      "technology": "graft build"
+    },
+    {
+      "id": "provider-scip-contract",
+      "owner": "scip-provider",
+      "protocol": "Provider interface",
+      "technology": "scip-typescript"
+    },
+    {
+      "id": "provider-typescript-contract",
+      "owner": "typescript-provider",
+      "protocol": "Provider interface",
+      "technology": "TypeScript compiler and TypeChecker"
+    },
+    {
+      "id": "repository-source-interface",
+      "owner": "repository-input",
+      "protocol": "Git",
+      "technology": "immutable revision"
+    },
+    {
+      "id": "scip-observation",
+      "owner": "provider-workflow",
+      "protocol": "JSON",
+      "technology": "observation envelope v1"
+    },
+    {
+      "id": "site-export-request",
+      "owner": "architecture-export-adapter",
+      "protocol": "in-process API",
+      "technology": "static site export request"
+    },
+    {
+      "id": "structurizr-export",
+      "owner": "structurizr-vnext",
+      "protocol": "CLI",
+      "technology": "Structurizr static export"
+    },
+    {
+      "id": "structurizr-projection-input",
+      "owner": "structurizr-projection",
+      "protocol": "in-process API",
+      "technology": "Structurizr DSL"
+    },
+    {
+      "id": "structurizr-site",
+      "owner": "static-site",
+      "protocol": "filesystem",
+      "technology": "workspace.dsl and diagrams"
+    },
+    {
+      "id": "typescript-observation",
+      "owner": "provider-workflow",
+      "protocol": "JSONL",
+      "technology": "observation envelope v1"
+    },
+    {
+      "id": "workflow-correlation-input",
+      "owner": "correlation-engine",
+      "protocol": "in-process API",
+      "technology": "normalized facts"
+    },
+    {
+      "id": "workflow-normalized-observation",
+      "owner": "observation-normalization",
+      "protocol": "in-process API",
+      "technology": "observation envelope v1"
+    }
+  ],
+  "relationships": [
+    {
+      "source": "analysis-command",
+      "target": "analysis-runtime",
+      "kind": "calls"
+    },
+    {
+      "source": "analysis-command",
+      "target": "repository-input",
+      "kind": "uses"
+    },
+    {
+      "source": "architecture-command",
+      "target": "canon-service",
+      "kind": "calls"
+    },
+    {
+      "source": "architecture-command",
+      "target": "static-site",
+      "kind": "calls"
+    },
+    {
+      "source": "architecture-export-adapter",
+      "target": "structurizr-vnext",
+      "kind": "calls"
+    },
+    {
+      "source": "canon-service",
+      "target": "documentation-projection",
+      "kind": "calls"
+    },
+    {
+      "source": "canon-service",
+      "target": "structurizr-projection",
+      "kind": "calls"
+    },
+    {
+      "source": "correlation-engine",
+      "target": "provider-matrix",
+      "kind": "data"
+    },
+    {
+      "source": "documentation-projection",
+      "target": "static-site",
+      "kind": "calls"
+    },
+    {
+      "source": "graft-provider",
+      "target": "provider-workflow",
+      "kind": "data"
+    },
+    {
+      "source": "provider-workflow",
+      "target": "correlation-engine",
+      "kind": "calls"
+    },
+    {
+      "source": "provider-workflow",
+      "target": "graft-provider",
+      "kind": "calls"
+    },
+    {
+      "source": "provider-workflow",
+      "target": "observation-normalization",
+      "kind": "calls"
+    },
+    {
+      "source": "provider-workflow",
+      "target": "scip-provider",
+      "kind": "calls"
+    },
+    {
+      "source": "provider-workflow",
+      "target": "typescript-provider",
+      "kind": "calls"
+    },
+    {
+      "source": "scip-provider",
+      "target": "provider-workflow",
+      "kind": "data"
+    },
+    {
+      "source": "static-site",
+      "target": "architecture-export-adapter",
+      "kind": "calls"
+    },
+    {
+      "source": "structurizr-projection",
+      "target": "static-site",
+      "kind": "calls"
+    },
+    {
+      "source": "typescript-provider",
+      "target": "provider-workflow",
+      "kind": "data"
+    }
+  ],
+  "responsibilities": {
+    "responsibilities": [
+      {
+        "kind": "responsibility",
+        "id": "canon-authority-responsibility",
+        "target": { "kind": "object", "id": "canon-service" },
+        "concern": "Parses and validates the complete Architecture Canon document"
+      },
+      {
+        "kind": "responsibility",
+        "id": "cli-routing-responsibility",
+        "target": { "kind": "object", "id": "wabachi-cli" },
+        "concern": "Exposes the run, matrix, and architecture command surfaces"
+      },
+      {
+        "kind": "responsibility",
+        "id": "correlation-responsibility",
+        "target": { "kind": "object", "id": "correlation-engine" },
+        "concern": "Correlates normalized provider facts deterministically"
+      },
+      {
+        "kind": "responsibility",
+        "id": "documentation-projection-responsibility",
+        "target": { "kind": "object", "id": "documentation-projection" },
+        "concern": "Projects Canon sections into renderer-neutral documentation data"
+      },
+      {
+        "kind": "responsibility",
+        "id": "matrix-projection-responsibility",
+        "target": { "kind": "object", "id": "provider-matrix" },
+        "concern": "Builds evaluation artifacts from persisted normalized facts"
+      },
+      {
+        "kind": "responsibility",
+        "id": "observation-normalization-responsibility",
+        "target": { "kind": "object", "id": "observation-normalization" },
+        "concern": "Normalizes provider observations into common facts"
+      },
+      {
+        "kind": "responsibility",
+        "id": "provider-execution-responsibility",
+        "target": { "kind": "object", "id": "provider-workflow" },
+        "concern": "Resolves a repository revision and executes registered providers"
+      },
+      {
+        "kind": "responsibility",
+        "id": "repository-resolution-responsibility",
+        "target": { "kind": "object", "id": "repository-resolution" },
+        "concern": "Resolves revisions and materializes an isolated analysis workspace"
+      },
+      {
+        "kind": "responsibility",
+        "id": "site-rendering-responsibility",
+        "target": { "kind": "object", "id": "static-site" },
+        "concern": "Assembles the complete disposable architecture static site"
+      },
+      {
+        "kind": "responsibility",
+        "id": "structurizr-export-responsibility",
+        "target": { "kind": "object", "id": "architecture-export-adapter" },
+        "concern": "Invokes the real Structurizr static export executable"
+      }
+    ]
+  },
+  "authority": {
+    "authority": [
+      { "kind": "authority", "concern": "analysis-runtime", "owner": "provider-workflow" },
+      { "kind": "authority", "concern": "architecture-documentation", "owner": "canon-service" },
+      { "kind": "authority", "concern": "canon-service", "owner": "canon-service" },
+      { "kind": "authority", "concern": "provider-matrix", "owner": "provider-matrix" },
+      { "kind": "authority", "concern": "static-site", "owner": "static-site" }
+    ],
+    "ownership": [
+      { "kind": "ownership", "resource": "architecture-documentation", "owner": "canon-service" },
+      { "kind": "ownership", "resource": "run-manifest", "owner": "provider-workflow" },
+      { "kind": "ownership", "resource": "static-site", "owner": "static-site" }
+    ]
+  },
+  "boundaries": [
+    {
+      "id": "analysis-isolation-boundary",
+      "kind": "trust",
+      "memberIds": ["analysis-runtime", "provider-workflow", "repository-input", "repository-resolution"]
+    },
+    {
+      "id": "architecture-documentation-boundary",
+      "kind": "semantic",
+      "memberIds": [
+        "architecture-documentation",
+        "architecture-export-adapter",
+        "canon-service",
+        "documentation-projection",
+        "static-site",
+        "structurizr-projection"
+      ]
+    },
+    {
+      "id": "evaluation-projection-boundary",
+      "kind": "ownership",
+      "memberIds": ["correlation-engine", "provider-matrix", "provider-workflow"]
+    }
+  ],
+  "constraints": [
+    {
+      "kind": "may-depend-on",
+      "source": "architecture-command",
+      "target": "architecture-documentation"
+    },
+    {
+      "kind": "must-go-through",
+      "source": "analysis-command",
+      "target": "provider-matrix",
+      "through": "provider-workflow"
+    },
+    {
+      "kind": "must-go-through",
+      "source": "architecture-command",
+      "target": "structurizr-vnext",
+      "through": "architecture-export-adapter"
+    },
+    {
+      "kind": "must-not-depend-on",
+      "source": "provider-matrix",
+      "target": "canon-service"
+    },
+    { "kind": "single-authority", "concern": "canon-service" }
+  ],
+  "flows": [
+    {
+      "id": "analysis-execution-flow",
+      "steps": [
+        {
+          "interfaceId": "cli-run",
+          "operation": "run or matrix command"
+        },
+        {
+          "interfaceId": "repository-source-interface",
+          "operation": "resolve repository revision"
+        },
+        {
+          "interfaceId": "provider-typescript-contract",
+          "operation": "execute TypeScript evidence provider"
+        },
+        {
+          "interfaceId": "typescript-observation",
+          "operation": "retain normalized observations"
+        },
+        {
+          "interfaceId": "provider-graft-contract",
+          "operation": "execute Graft structural provider"
+        },
+        {
+          "interfaceId": "graft-observation",
+          "operation": "retain normalized observations"
+        },
+        {
+          "interfaceId": "provider-scip-contract",
+          "operation": "execute SCIP provider"
+        },
+        {
+          "interfaceId": "scip-observation",
+          "operation": "retain normalized observations"
+        },
+        {
+          "interfaceId": "workflow-normalized-observation",
+          "operation": "normalize facts"
+        },
+        {
+          "interfaceId": "workflow-correlation-input",
+          "operation": "correlate entities"
+        },
+        {
+          "interfaceId": "correlation-matrix-input",
+          "operation": "write evaluation matrix artifacts"
+        }
+      ]
+    },
+    {
+      "id": "architecture-render-flow",
+      "steps": [
+        {
+          "interfaceId": "architecture-canon-input",
+          "operation": "load and validate Canon JSON"
+        },
+        {
+          "interfaceId": "documentation-projection-input",
+          "operation": "project documentation model"
+        },
+        {
+          "interfaceId": "structurizr-projection-input",
+          "operation": "project Structurizr DSL"
+        },
+        {
+          "interfaceId": "documentation-site",
+          "operation": "write index.html"
+        },
+        {
+          "interfaceId": "structurizr-site",
+          "operation": "write workspace.dsl"
+        },
+        {
+          "interfaceId": "site-export-request",
+          "operation": "request static export"
+        },
+        {
+          "interfaceId": "structurizr-export",
+          "operation": "render diagrams and static site"
+        }
+      ]
+    }
+  ],
+  "deployment": {
+    "runtimeEnvironments": [
+      {
+        "kind": "runtime-environment",
+        "id": "local-node",
+        "displayName": "Local or CI Node.js process"
+      }
+    ],
+    "deploymentNodes": [
+      {
+        "kind": "deployment-node",
+        "id": "wabachi-process",
+        "environmentId": "local-node",
+        "displayName": "Wabachi process"
+      }
+    ],
+    "deploymentInstances": [
+      {
+        "kind": "deployment-instance",
+        "id": "analysis-runtime-instance",
+        "nodeId": "wabachi-process",
+        "displayName": "Analysis runtime"
+      },
+      {
+        "kind": "deployment-instance",
+        "id": "architecture-documentation-instance",
+        "nodeId": "wabachi-process",
+        "displayName": "Architecture Documentation"
+      },
+      {
+        "kind": "deployment-instance",
+        "id": "wabachi-cli-instance",
+        "nodeId": "wabachi-process",
+        "displayName": "Wabachi CLI"
+      }
+    ],
+    "infrastructureReferences": [
+      {
+        "kind": "infrastructure-reference",
+        "id": "node-runtime",
+        "reference": "package-json-engines-node-22-13"
+      },
+      {
+        "kind": "infrastructure-reference",
+        "id": "run-root-layout",
+        "reference": "run-root-source-workspace-raw-normalized"
+      }
+    ],
+    "mappings": [
+      {
+        "kind": "deployment-mapping",
+        "softwareElementId": "analysis-runtime",
+        "deploymentInstanceId": "analysis-runtime-instance"
+      },
+      {
+        "kind": "deployment-mapping",
+        "softwareElementId": "architecture-documentation",
+        "deploymentInstanceId": "architecture-documentation-instance"
+      },
+      {
+        "kind": "deployment-mapping",
+        "softwareElementId": "wabachi-cli",
+        "deploymentInstanceId": "wabachi-cli-instance"
+      }
+    ]
+  },
+  "repositoryMappings": [
+    {
+      "canonId": "analysis-command",
+      "paths": [{ "path": "src/cli.ts", "scope": "file" }],
+      "symbols": [{ "path": "src/cli.ts", "symbol": "runCli" }],
+      "tests": []
+    },
+    {
+      "canonId": "analysis-runtime",
+      "paths": [{ "path": "src/runtime", "scope": "directory" }],
+      "symbols": [],
+      "tests": []
+    },
+    {
+      "canonId": "architecture-command",
+      "paths": [{ "path": "src/architecture/cli.ts", "scope": "file" }],
+      "symbols": [{ "path": "src/architecture/cli.ts", "symbol": "runArchitectureCli" }],
+      "tests": [
+        {
+          "path": "src/architecture/cli.test.ts",
+          "selector": "render uses the override as one executable identity and fixed export arguments"
+        }
+      ]
+    },
+    {
+      "canonId": "architecture-documentation",
+      "paths": [{ "path": "src/architecture", "scope": "directory" }],
+      "symbols": [],
+      "tests": []
+    },
+    {
+      "canonId": "architecture-export-adapter",
+      "paths": [{ "path": "src/architecture/projection/structurizr-export.ts", "scope": "file" }],
+      "symbols": [
+        { "path": "src/architecture/projection/structurizr-export.ts", "symbol": "runStructurizrStaticExport" }
+      ],
+      "tests": []
+    },
+    {
+      "canonId": "canon-service",
+      "paths": [{ "path": "src/architecture/canon", "scope": "directory" }],
+      "symbols": [{ "path": "src/architecture/canon/document.ts", "symbol": "createArchitectureDocument" }],
+      "tests": []
+    },
+    {
+      "canonId": "correlation-engine",
+      "paths": [{ "path": "src/runtime/correlation.ts", "scope": "file" }],
+      "symbols": [],
+      "tests": []
+    },
+    {
+      "canonId": "documentation-projection",
+      "paths": [{ "path": "src/architecture/documentation/project.ts", "scope": "file" }],
+      "symbols": [{ "path": "src/architecture/documentation/project.ts", "symbol": "projectArchitectureDocument" }],
+      "tests": []
+    },
+    {
+      "canonId": "graft-provider",
+      "paths": [{ "path": "src/runtime/graftProvider.ts", "scope": "file" }],
+      "symbols": [{ "path": "src/runtime/graftProvider.ts", "symbol": "createGraftProvider" }],
+      "tests": []
+    },
+    {
+      "canonId": "observation-normalization",
+      "paths": [{ "path": "src/runtime/facts.ts", "scope": "file" }],
+      "symbols": [{ "path": "src/runtime/facts.ts", "symbol": "normalizeFacts" }],
+      "tests": []
+    },
+    {
+      "canonId": "provider-matrix",
+      "paths": [{ "path": "src/runtime/matrix.ts", "scope": "file" }],
+      "symbols": [{ "path": "src/runtime/matrix.ts", "symbol": "buildProviderMatrix" }],
+      "tests": []
+    },
+    {
+      "canonId": "provider-workflow",
+      "paths": [{ "path": "src/runtime/workflow.ts", "scope": "file" }],
+      "symbols": [{ "path": "src/runtime/workflow.ts", "symbol": "runProviderMatrix" }],
+      "tests": []
+    },
+    {
+      "canonId": "repository-input",
+      "paths": [{ "path": "src/runtime/repository.ts", "scope": "file" }],
+      "symbols": [],
+      "tests": []
+    },
+    {
+      "canonId": "repository-resolution",
+      "paths": [{ "path": "src/runtime/repository.ts", "scope": "file" }],
+      "symbols": [
+        { "path": "src/runtime/repository.ts", "symbol": "resolveRepository" },
+        { "path": "src/runtime/repository.ts", "symbol": "createIsolatedWorkspace" }
+      ],
+      "tests": []
+    },
+    {
+      "canonId": "run-manifest",
+      "paths": [{ "path": "src/runtime/manifest.ts", "scope": "file" }],
+      "symbols": [{ "path": "src/runtime/manifest.ts", "symbol": "writeManifest" }],
+      "tests": []
+    },
+    {
+      "canonId": "scip-provider",
+      "paths": [{ "path": "src/runtime/scipProvider.ts", "scope": "file" }],
+      "symbols": [{ "path": "src/runtime/scipProvider.ts", "symbol": "createScipTypescriptProvider" }],
+      "tests": []
+    },
+    {
+      "canonId": "static-site",
+      "paths": [{ "path": "src/architecture/documentation/site.ts", "scope": "file" }],
+      "symbols": [{ "path": "src/architecture/documentation/site.ts", "symbol": "buildArchitectureSite" }],
+      "tests": []
+    },
+    {
+      "canonId": "structurizr-projection",
+      "paths": [{ "path": "src/architecture/projection/structurizr.ts", "scope": "file" }],
+      "symbols": [
+        { "path": "src/architecture/projection/structurizr.ts", "symbol": "projectArchitectureDocumentToStructurizr" }
+      ],
+      "tests": []
+    },
+    {
+      "canonId": "typescript-provider",
+      "paths": [{ "path": "src/runtime/typescriptProvider.ts", "scope": "file" }],
+      "symbols": [{ "path": "src/runtime/typescriptProvider.ts", "symbol": "createTypeScriptProvider" }],
+      "tests": []
+    },
+    {
+      "canonId": "wabachi-cli",
+      "paths": [
+        { "path": "src/index.ts", "scope": "file" },
+        { "path": "src/cli.ts", "scope": "file" }
+      ],
+      "symbols": [{ "path": "src/cli.ts", "symbol": "runCli" }],
+      "tests": []
+    }
+  ],
+  "decisions": {
+    "decisions": [
+      {
+        "id": "architecture-documentation-decision",
+        "title": "Canon is the authority and site output is a projection",
+        "status": "accepted",
+        "type": "architecture",
+        "rationale": "The Architecture Documentation domain accepts an explicit Canon document, then independently projects documentation HTML and Structurizr workspace/site artifacts. Generated output is disposable and does not replace the hand-authored Canon.",
+        "targetIds": ["architecture-documentation", "canon-service", "static-site"],
+        "referenceIds": ["architecture-cli-contract", "architecture-site-contract", "issue-43"],
+        "supersedes": []
+      },
+      {
+        "id": "authority-boundary-decision",
+        "title": "Evaluation artifacts remain downstream of canonical authority",
+        "status": "accepted",
+        "type": "architecture",
+        "rationale": "The implemented provider workflow writes observations, normalized facts, correlation, and Provider Matrix evaluation artifacts. The architecture-documentation CLI consumes an explicit Canon independently; Matrix artifacts are not used as Canon input.",
+        "targetIds": ["canon-service", "correlation-engine", "provider-matrix", "provider-workflow"],
+        "referenceIds": ["adr-024"],
+        "supersedes": []
+      },
+      {
+        "id": "cli-surface-decision",
+        "title": "Architecture validation and rendering use the public CLI path",
+        "status": "accepted",
+        "type": "architecture",
+        "rationale": "The root CLI routes explicit Architecture Canon validate and render commands to the production architecture adapter without changing runtime provider behavior.",
+        "targetIds": ["architecture-command", "wabachi-cli"],
+        "referenceIds": ["architecture-cli-contract"],
+        "supersedes": []
+      }
+    ],
+    "references": [
+      {
+        "id": "adr-024",
+        "label": "ADR-024 authority boundaries",
+        "uri": "docs/architecture/ADR-024-v2-authority-boundaries.md",
+        "description": "Accepted repository architecture contract separating authority processing from evaluation projections."
+      },
+      {
+        "id": "architecture-cli-contract",
+        "label": "Architecture CLI implementation",
+        "uri": "src/architecture/cli.ts",
+        "description": "Production validate/render adapter used by the root CLI."
+      },
+      {
+        "id": "architecture-site-contract",
+        "label": "Architecture site assembly",
+        "uri": "src/architecture/documentation/site.ts",
+        "description": "Production assembly edge for HTML, DSL, projection losses, and Structurizr export."
+      },
+      {
+        "id": "issue-43",
+        "label": "Architecture Documentation domain",
+        "uri": "https://github.com/yohn-jp/wabachi/issues/43",
+        "description": "Repository issue tracking the completed Architecture Documentation domain."
+      }
+    ],
+    "referenceAttachments": [
+      { "targetId": "architecture-command", "referenceIds": ["architecture-cli-contract"] },
+      { "targetId": "canon-service", "referenceIds": ["adr-024", "issue-43"] },
+      { "targetId": "static-site", "referenceIds": ["architecture-site-contract"] }
+    ]
+  },
+  "views": [
+    {
+      "key": "current-architecture",
+      "kind": "structural",
+      "scope": {
+        "include": [
+          { "kind": "element", "id": "analysis-runtime" },
+          { "kind": "element", "id": "architecture-documentation" },
+          { "kind": "element", "id": "repository-input" },
+          { "kind": "element", "id": "structurizr-vnext" },
+          { "kind": "element", "id": "wabachi-cli" }
+        ],
+        "exclude": []
+      },
+      "order": 1,
+      "title": "Wabachi current implemented architecture",
+      "presentation": { "layout": "auto", "direction": "lr" }
+    },
+    {
+      "key": "analysis-execution",
+      "kind": "dynamic",
+      "scope": { "include": [{ "kind": "flow", "id": "analysis-execution-flow" }], "exclude": [] },
+      "order": 2,
+      "title": "Repository analysis execution",
+      "presentation": { "layout": "auto", "direction": "lr" }
+    },
+    {
+      "key": "architecture-render",
+      "kind": "dynamic",
+      "scope": { "include": [{ "kind": "flow", "id": "architecture-render-flow" }], "exclude": [] },
+      "order": 3,
+      "title": "Architecture Documentation render",
+      "presentation": { "layout": "auto", "direction": "lr" }
+    },
+    {
+      "key": "local-deployment",
+      "kind": "deployment",
+      "scope": {
+        "include": [
+          { "kind": "element", "id": "analysis-runtime" },
+          { "kind": "element", "id": "architecture-documentation" },
+          { "kind": "element", "id": "wabachi-cli" },
+          { "kind": "runtime-environment", "id": "local-node" },
+          { "kind": "deployment-node", "id": "wabachi-process" }
+        ],
+        "exclude": []
+      },
+      "order": 4,
+      "title": "Current local or CI deployment",
+      "presentation": { "layout": "auto", "direction": "tb" }
+    }
+  ],
+  "globalIdentityRegistry": {
+    "entries": [
+      { "id": "adr-024", "namespace": "reference" },
+      { "id": "analysis-command", "namespace": "element" },
+      { "id": "analysis-execution-flow", "namespace": "flow" },
+      { "id": "analysis-isolation-boundary", "namespace": "boundary" },
+      { "id": "analysis-runtime", "namespace": "element" },
+      { "id": "architecture-canon-input", "namespace": "interface" },
+      { "id": "architecture-cli-contract", "namespace": "reference" },
+      { "id": "architecture-command", "namespace": "element" },
+      { "id": "architecture-documentation", "namespace": "element" },
+      { "id": "architecture-documentation-boundary", "namespace": "boundary" },
+      { "id": "architecture-documentation-decision", "namespace": "decision" },
+      { "id": "architecture-export-adapter", "namespace": "element" },
+      { "id": "architecture-render", "namespace": "interface" },
+      { "id": "architecture-render-flow", "namespace": "flow" },
+      { "id": "architecture-site-contract", "namespace": "reference" },
+      { "id": "authority-boundary-decision", "namespace": "decision" },
+      { "id": "canon-authority-responsibility", "namespace": "responsibility" },
+      { "id": "canon-service", "namespace": "element" },
+      { "id": "cli-routing-responsibility", "namespace": "responsibility" },
+      { "id": "cli-run", "namespace": "interface" },
+      { "id": "cli-surface-decision", "namespace": "decision" },
+      { "id": "correlation-engine", "namespace": "element" },
+      { "id": "correlation-matrix-input", "namespace": "interface" },
+      { "id": "correlation-responsibility", "namespace": "responsibility" },
+      { "id": "documentation-projection-input", "namespace": "interface" },
+      { "id": "documentation-projection-responsibility", "namespace": "responsibility" },
+      { "id": "documentation-projection", "namespace": "element" },
+      { "id": "documentation-site", "namespace": "interface" },
+      { "id": "evaluation-projection-boundary", "namespace": "boundary" },
+      { "id": "graft-observation", "namespace": "interface" },
+      { "id": "graft-provider", "namespace": "element" },
+      { "id": "issue-43", "namespace": "reference" },
+      { "id": "matrix-projection-responsibility", "namespace": "responsibility" },
+      { "id": "observation-normalization-responsibility", "namespace": "responsibility" },
+      { "id": "observation-normalization", "namespace": "element" },
+      { "id": "provider-execution-responsibility", "namespace": "responsibility" },
+      { "id": "provider-graft-contract", "namespace": "interface" },
+      { "id": "provider-matrix", "namespace": "element" },
+      { "id": "provider-scip-contract", "namespace": "interface" },
+      { "id": "provider-typescript-contract", "namespace": "interface" },
+      { "id": "provider-workflow", "namespace": "element" },
+      { "id": "repository-input", "namespace": "element" },
+      { "id": "repository-resolution", "namespace": "element" },
+      { "id": "repository-resolution-responsibility", "namespace": "responsibility" },
+      { "id": "repository-source-interface", "namespace": "interface" },
+      { "id": "run-manifest", "namespace": "element" },
+      { "id": "scip-observation", "namespace": "interface" },
+      { "id": "scip-provider", "namespace": "element" },
+      { "id": "site-export-request", "namespace": "interface" },
+      { "id": "site-rendering-responsibility", "namespace": "responsibility" },
+      { "id": "static-site", "namespace": "element" },
+      { "id": "structurizr-export", "namespace": "interface" },
+      { "id": "structurizr-export-responsibility", "namespace": "responsibility" },
+      { "id": "structurizr-projection-input", "namespace": "interface" },
+      { "id": "structurizr-projection", "namespace": "element" },
+      { "id": "structurizr-site", "namespace": "interface" },
+      { "id": "structurizr-vnext", "namespace": "element" },
+      { "id": "typescript-observation", "namespace": "interface" },
+      { "id": "typescript-provider", "namespace": "element" },
+      { "id": "wabachi", "namespace": "architecture" },
+      { "id": "wabachi-cli", "namespace": "element" },
+      { "id": "workflow-correlation-input", "namespace": "interface" },
+      { "id": "workflow-normalized-observation", "namespace": "interface" }
+    ]
+  }
+}
