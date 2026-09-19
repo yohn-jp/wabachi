@@ -34,7 +34,7 @@ test("records the exact vNext static-export argv, tool version, and output witho
     directory,
     [
       "const args = process.argv.slice(2);",
-      "if (args[0] === '--version') { console.log('Structurizr CLI vNext mock 1.2.3'); process.exit(0); }",
+      "if (args[0] === 'version') { console.log('Structurizr CLI vNext mock 1.2.3'); process.exit(0); }",
       "if (args[0] === 'export') { console.log(JSON.stringify(args)); console.error('static export complete'); process.exit(0); }",
       "process.exit(9);",
     ].join("\n"),
@@ -102,7 +102,7 @@ test("retains exporter stderr and exit status when static export fails", async (
     directory,
     [
       "const args = process.argv.slice(2);",
-      "if (args[0] === '--version') { console.log('Structurizr CLI vNext mock 1.2.3'); process.exit(0); }",
+      "if (args[0] === 'version') { console.log('Structurizr CLI vNext mock 1.2.3'); process.exit(0); }",
       "console.log('partial export output');",
       "console.error('invalid workspace');",
       "process.exit(7);",
@@ -135,7 +135,7 @@ test("rejects missing bounded inputs without starting a process", async () => {
   assert.equal(result.status, "invalid-input");
   assert.equal(result.diagnostic.code, "invalid-input");
   assert.equal(result.diagnostic.phase, "input");
-  assert.deepEqual(result.invocations.version.args, ["--version"]);
+  assert.deepEqual(result.invocations.version.args, ["version"]);
   assert.deepEqual(result.invocations.export.args, [
     "export",
     "-format",

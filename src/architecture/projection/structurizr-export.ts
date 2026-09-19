@@ -189,11 +189,12 @@ function failureResult(
 }
 
 function versionFromOutput(output: string): string | null {
-  const version = output
+  const lines = output
     .split(/\r?\n/u)
     .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  return version ?? null;
+    .filter((line) => line.length > 0);
+  const releaseLine = lines.find((line) => /\bstructurizr:\s+\S+/iu.test(line));
+  return releaseLine?.replace(/^.*?\b(structurizr:\s+\S+).*$/iu, "$1") ?? lines[0] ?? null;
 }
 
 /**
@@ -204,7 +205,7 @@ export async function runStructurizrStaticExport(
   request: StructurizrStaticExportRequest,
 ): Promise<StructurizrStaticExportResult> {
   const launcherArgs = request.launcher.args === undefined ? [] : [...request.launcher.args];
-  const versionArgs = [...launcherArgs, "--version"];
+  const versionArgs = [...launcherArgs, "version"];
   const exportArgs = [
     ...launcherArgs,
     "export",

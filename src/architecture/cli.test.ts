@@ -92,7 +92,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(invocationLog)}, JSON.stringify(args) + "\\n");
-if (args[0] === "--version") {
+if (args[0] === "version") {
   console.log("test-structurizr-1");
 } else {
   const output = args[args.indexOf("-output") + 1];
@@ -120,7 +120,7 @@ if (args[0] === "--version") {
       .split("\n")
       .map((line) => JSON.parse(line) as string[]);
     assert.deepEqual(invocations, [
-      ["--version"],
+      ["version"],
       [
         "export",
         "-format",

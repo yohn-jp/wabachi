@@ -21,6 +21,7 @@ export const PROJECTION_LOSS_CODES = [
   "unsupported-interface",
   "unsupported-element-annotation",
   "unsupported-containment",
+  "unsupported-relationship",
   "unsupported-flow",
   "unsupported-deployment-instance",
   "unsupported-deployment-mapping",
@@ -153,14 +154,35 @@ function compareStrings(left: string, right: string): number {
   return 0;
 }
 
-function relationshipEntries(document: ArchitectureDocumentV1): readonly RelationshipEntry[] {
+function isAncestor(elements: ReadonlyMap<string, ElementRecord>, ancestorId: string, descendantId: string): boolean {
+  let current = elements.get(descendantId);
+  while (current?.parentId !== undefined) {
+    if (current.parentId === ancestorId) return true;
+    current = elements.get(current.parentId);
+  }
+  return false;
+}
+
+function relationshipEntries(document: ArchitectureDocumentV1, losses: LossCollector): readonly RelationshipEntry[] {
+  const elements = indexById(document.elements);
   return Object.freeze(
-    document.relationships.map((record) => {
+    document.relationships.flatMap((record, relationshipIndex) => {
+      if (isAncestor(elements, record.source, record.target) || isAncestor(elements, record.target, record.source)) {
+        losses.add(
+          "unsupported-relationship",
+          `relationships[${relationshipIndex}]`,
+          [record.source, record.target],
+          `Structurizr cannot represent a relationship between a Canon element and its containment parent: ${record.source} -> ${record.target}`,
+        );
+        return [];
+      }
       const candidate = record as unknown as { readonly id?: unknown };
-      return Object.freeze({
-        record,
-        ...(typeof candidate.id === "string" ? { explicitId: candidate.id } : {}),
-      });
+      return [
+        Object.freeze({
+          record,
+          ...(typeof candidate.id === "string" ? { explicitId: candidate.id } : {}),
+        }),
+      ];
     }),
   );
 }
@@ -243,7 +265,7 @@ function addIdentityMappings(document: ArchitectureDocumentV1): readonly Structu
 }
 
 function createContext(document: ArchitectureDocumentV1, losses: LossCollector): ProjectionContext {
-  const entries = relationshipEntries(document);
+  const entries = relationshipEntries(document, losses);
   const explicit = new Map<string, RelationshipEntry>();
   const byInterface = new Map<string, RelationshipEntry[]>();
 
@@ -670,7 +692,11 @@ function renderStructuralView(context: ProjectionContext, view: ViewSpec, viewIn
     }
     declaration = form;
   }
-  const lines = [`        ${declaration.type} ${declaration.scope} ${quote(viewKey(view.key))} {`];
+  const header =
+    declaration.type === "systemLandscape"
+      ? `        ${declaration.type} ${viewKey(view.key)} {`
+      : `        ${declaration.type} ${declaration.scope} ${viewKey(view.key)} {`;
+  const lines = [header];
   renderViewMetadata(view, lines);
   renderPresentation(context, view, viewIndex, lines);
 
@@ -788,7 +814,7 @@ function renderDynamicView(context: ProjectionContext, view: ViewSpec, viewIndex
     scope = context.elementIdentifiers.get(root.id) as string;
   }
 
-  const lines = [`        dynamic ${scope} ${quote(viewKey(view.key))} {`];
+  const lines = [`        dynamic ${scope} ${viewKey(view.key)} {`];
   renderViewMetadata(view, lines);
   renderPresentation(context, view, viewIndex, lines);
 
@@ -860,7 +886,7 @@ function renderDeploymentView(context: ProjectionContext, view: ViewSpec, viewIn
     (candidate) => candidate.id === environment,
   );
   const lines = [
-    `        deployment ${scope} ${context.document.deployment.runtimeEnvironments.length > 0 ? (context.document.deployment.runtimeEnvironments.find((candidate) => candidate.id === environment) ? structurizrIdentifier("runtime-environment", environment) : quote(environment)) : quote(environment)} ${quote(viewKey(view.key))} {`,
+    `        deployment ${scope} ${context.document.deployment.runtimeEnvironments.length > 0 ? (context.document.deployment.runtimeEnvironments.find((candidate) => candidate.id === environment) ? structurizrIdentifier("runtime-environment", environment) : quote(environment)) : quote(environment)} ${viewKey(view.key)} {`,
   ];
   renderViewMetadata(view, lines);
   renderPresentation(context, view, viewIndex, lines);

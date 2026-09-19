@@ -1,0 +1,35 @@
+name: Architecture dogfood certification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "architecture/**"
+      - "scripts/certify-architecture-dogfood.*"
+      - "src/architecture/**"
+      - ".github/workflows/architecture-dogfood.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2
+        with:
+          version: 11.18.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node --test --import tsx src/architecture/projection/structurizr-export.test.ts src/architecture/projection/structurizr.test.ts src/architecture/dogfood.test.ts
+      - run: node --test scripts/certify-architecture-dogfood.test.mjs
+      - run: node scripts/certify-architecture-dogfood.mjs
+      - run: pnpm run verify
