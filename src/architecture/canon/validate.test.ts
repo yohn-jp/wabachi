@@ -114,6 +114,65 @@ test("fails closed for unknown, incompatible, and excluded view roots", () => {
   );
 });
 
+test("rejects a single-authority concern without an authority owner", () => {
+  const document = createCompleteDocument();
+  const invalidDocument = {
+    ...document,
+    authority: { ...document.authority, authority: [] },
+  } as typeof document;
+
+  const result = validateArchitectureDocument(invalidDocument);
+
+  assert.deepEqual(result.diagnostics, [
+    {
+      code: "invalid-single-authority",
+      path: "constraints[1]",
+      message: "single-authority constraint requires exactly one authority owner for concern: orders; found 0",
+    },
+  ]);
+});
+
+test("rejects a single-authority concern with multiple distinct authority owners", () => {
+  const document = createCompleteDocument();
+  const invalidDocument = {
+    ...document,
+    authority: {
+      ...document.authority,
+      authority: [...document.authority.authority, { kind: "authority", concern: "orders", owner: "payments" }],
+    },
+  } as typeof document;
+
+  const result = validateArchitectureDocument(invalidDocument);
+
+  assert.deepEqual(result.diagnostics, [
+    {
+      code: "invalid-single-authority",
+      path: "constraints[1]",
+      message: "single-authority constraint requires exactly one authority owner for concern: orders; found 2",
+    },
+  ]);
+});
+
+test("does not evaluate single-authority cardinality when its concern is invalid", () => {
+  const document = createCompleteDocument();
+  const invalidDocument = {
+    ...document,
+    constraints: document.constraints.map((constraint) =>
+      constraint.kind === "single-authority" ? { ...constraint, concern: "missing-concern" } : constraint,
+    ),
+  } as unknown as typeof document;
+
+  const result = validateArchitectureDocument(invalidDocument);
+
+  assert.deepEqual(result.diagnostics, [
+    {
+      code: "invalid-constraint-target",
+      path: "constraints[1].concern",
+      message: "constraint concern references unknown element: missing-concern",
+    },
+  ]);
+});
+
 test("returns deterministic, path-addressed diagnostics and does not mutate Canon", () => {
   const document = createArchitectureDocument({
     documentId: "document",

@@ -13,7 +13,7 @@ Wabachi provides deterministic repository-analysis workflows for codebase unders
 
 ## Quick start
 
-Requires Node.js 22.13 or newer.
+Requires Node.js 24 or newer.
 
 ```bash
 npm install --global wabachi

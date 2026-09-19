@@ -34,6 +34,7 @@ export const ARCHITECTURE_DIAGNOSTIC_CODES = [
   "invalid-boundary-member",
   "invalid-authority-target",
   "invalid-constraint-target",
+  "invalid-single-authority",
   "invalid-flow-reference",
   "invalid-deployment-reference",
   "invalid-repository-mapping",
@@ -458,7 +459,7 @@ function validateAuthorityAndConstraints(
     const constraint = document.constraints[constraintIndex];
     const path = `constraints[${constraintIndex}]`;
     if (constraint.kind === "single-authority") {
-      validateIdentityReference(
+      const validConcern = validateIdentityReference(
         index,
         diagnostics,
         `${path}.concern`,
@@ -467,6 +468,18 @@ function validateAuthorityAndConstraints(
         "invalid-constraint-target",
         "constraint concern",
       );
+      if (validConcern) {
+        const owners = new Set(
+          document.authority.authority.filter((fact) => fact.concern === constraint.concern).map((fact) => fact.owner),
+        );
+        if (owners.size !== 1) {
+          diagnostics.add(
+            "invalid-single-authority",
+            path,
+            `single-authority constraint requires exactly one authority owner for concern: ${constraint.concern}; found ${owners.size}`,
+          );
+        }
+      }
     } else {
       validateIdentityReference(
         index,

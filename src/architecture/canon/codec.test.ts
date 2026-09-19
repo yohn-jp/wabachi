@@ -154,6 +154,16 @@ test("fails closed for unsupported versions, unknown fields, invalid references,
   assert.throws(() => decodeArchitectureDocument(forged), /failed validation|global identity registry/);
 });
 
+test("fails closed when a single-authority constraint has no authority owner", () => {
+  const value = parsed(encodeCanonicalJson(createCompleteDocument()));
+  const invalid = structuredClone(value);
+
+  invalid.constraints = [{ kind: "single-authority", concern: "orders" }];
+  (invalid.authority as Record<string, unknown>).authority = [];
+
+  assert.throws(() => decodeArchitectureDocument(invalid), /failed validation.*single-authority/);
+});
+
 test("rejects malformed JSON text at the codec boundary", () => {
   assert.throws(() => parseCanonicalArchitectureDocument("{}"), /missing required field/);
   assert.throws(() => parseCanonicalArchitectureDocument("not json"), /invalid canonical/);
