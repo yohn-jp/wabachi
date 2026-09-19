@@ -22,7 +22,11 @@ function main() {
   if (!fs.existsSync(distEntry)) throw new Error("dist is missing; run pnpm run build before the package suite");
 
   const packResult = run("npm", ["pack", "--dry-run", "--json"]);
-  const [packInfo] = JSON.parse(packResult.stdout);
+  const packReport = JSON.parse(packResult.stdout);
+  const packInfo = Array.isArray(packReport) ? packReport[0] : Object.values(packReport)[0];
+  if (packInfo === undefined || !Array.isArray(packInfo.files)) {
+    throw new Error("npm pack --json returned no package file report");
+  }
   const packedFiles = packInfo.files.map((entry) => entry.path);
 
   const executableBinPaths = Object.values(
