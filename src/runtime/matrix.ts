@@ -1770,11 +1770,14 @@ class StreamingNormalizedFactsReader {
     return this.buffer[this.position];
   }
 
-  private compact(): void {
+  private compact(): number {
     if (this.position > 4 * 1024 * 1024) {
+      const trimmed = this.position;
       this.buffer = this.buffer.slice(this.position);
       this.position = 0;
+      return trimmed;
     }
+    return 0;
   }
 
   private async skipWhitespace(): Promise<void> {
@@ -1839,13 +1842,13 @@ class StreamingNormalizedFactsReader {
         }
       } else if (char === '"') {
         inString = true;
+      } else if (depth === 0 && delimiters.has(char)) {
+        text += this.buffer.slice(start, this.position);
+        return text;
       } else if (char === "{" || char === "[") {
         depth += 1;
       } else if (char === "}" || char === "]") {
         depth -= 1;
-      } else if (depth === 0 && delimiters.has(char)) {
-        text += this.buffer.slice(start, this.position);
-        return text;
       }
       this.position += 1;
       if (this.buffer.length - this.position < 2 && !this.eof) {
@@ -1853,7 +1856,8 @@ class StreamingNormalizedFactsReader {
         await this.fill();
         start = this.position;
       }
-      this.compact();
+      const trimmed = this.compact();
+      start -= trimmed;
       if (this.position < start) start = this.position;
     }
   }
