@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./docs/assets/readme/wabachi-hero.webp" alt="WABACHI — Repository Semantic Authority." width="100%">
+  <img src="./docs/assets/readme/wabachi-hero.svg" alt="WABACHI — Repository Semantic Authority. Evidence → Derived State → Review / Admission → Canonical Declaration. Explicit · Auditable · Canonical." width="100%">
 </p>
 
 <p align="center">
