@@ -82,6 +82,8 @@ function createCompleteDocument() {
         scope: {
           include: [{ kind: "flow", id: "checkout" }],
         },
+        root: { kind: "element", id: "orders" },
+        description: "Checkout flow",
         order: 1,
       },
     ],
@@ -98,6 +100,14 @@ test("decodes and round-trips a complete validated v1 document", () => {
   const decoded = decodeArchitectureDocument(parsed(encoded));
 
   assert.deepEqual(decoded, document);
+  assert.deepEqual((parsed(encoded).views as Array<Record<string, unknown>>)[0], {
+    key: "checkout-flow",
+    kind: "dynamic",
+    scope: { include: [{ kind: "flow", id: "checkout" }], exclude: [] },
+    root: { kind: "element", id: "orders" },
+    order: 1,
+    description: "Checkout flow",
+  });
   assert.equal(parseCanonicalArchitectureDocument(encoded).globalIdentityRegistry.entries.length, 10);
   assert.equal(Object.keys(parsed(encoded)).at(-1), "globalIdentityRegistry");
 });

@@ -758,6 +758,7 @@
       "key": "analysis-execution",
       "kind": "dynamic",
       "scope": { "include": [{ "kind": "flow", "id": "analysis-execution-flow" }], "exclude": [] },
+      "root": { "kind": "element", "id": "analysis-runtime" },
       "order": 2,
       "title": "Repository analysis execution",
       "presentation": { "layout": "auto", "direction": "lr" }
@@ -766,6 +767,7 @@
       "key": "architecture-render",
       "kind": "dynamic",
       "scope": { "include": [{ "kind": "flow", "id": "architecture-render-flow" }], "exclude": [] },
+      "root": { "kind": "element", "id": "architecture-documentation" },
       "order": 3,
       "title": "Architecture Documentation render",
       "presentation": { "layout": "auto", "direction": "lr" }
@@ -783,6 +785,7 @@
         ],
         "exclude": []
       },
+      "root": { "kind": "runtime-environment", "id": "local-node" },
       "order": 4,
       "title": "Current local or CI deployment",
       "presentation": { "layout": "auto", "direction": "tb" }

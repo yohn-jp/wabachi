@@ -78,6 +78,42 @@ test("accepts a complete document when every cross-section reference is eligible
   assert.deepEqual(result, { valid: true, diagnostics: [] });
 });
 
+test("fails closed for unknown, incompatible, and excluded view roots", () => {
+  const document = createCompleteDocument();
+  const invalidDocument = {
+    ...document,
+    views: [
+      {
+        ...document.views[0],
+        root: { kind: "element", id: "missing-root" },
+      },
+      {
+        ...document.views[1],
+        root: { kind: "runtime-environment", id: "production" },
+      },
+      {
+        ...document.views[2],
+        root: { kind: "runtime-environment", id: "production" },
+        scope: {
+          ...document.views[2]?.scope,
+          exclude: [{ kind: "runtime-environment", id: "production" }],
+        },
+      },
+    ],
+  } as unknown as typeof document;
+
+  const first = validateArchitectureDocument(invalidDocument);
+  const second = validateArchitectureDocument(invalidDocument);
+
+  assert.deepEqual(first, second);
+  assert.equal(first.valid, false);
+  assert.ok(first.diagnostics.some(({ path, code }) => path === "views[0].root" && code === "invalid-view-root"));
+  assert.ok(first.diagnostics.some(({ path, code }) => path === "views[1].root" && code === "invalid-view-root"));
+  assert.ok(
+    first.diagnostics.some(({ path, code }) => path === "views[2].scope.exclude[0]" && code === "invalid-view-root"),
+  );
+});
+
 test("rejects a single-authority concern without an authority owner", () => {
   const document = createCompleteDocument();
   const invalidDocument = {

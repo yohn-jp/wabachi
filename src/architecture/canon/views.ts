@@ -69,8 +69,11 @@ export interface ViewInput {
   readonly key: string;
   readonly kind: ViewKind;
   readonly scope: ViewScopeInput;
+  /** An optional renderer-neutral Canon root; complete-document validation resolves it. */
+  readonly root?: ViewReferenceInput;
   readonly order?: number;
   readonly title?: string;
+  readonly description?: string;
   readonly presentation?: ViewPresentationHintsInput;
 }
 
@@ -78,8 +81,10 @@ export interface ViewSpec {
   readonly key: ViewKey;
   readonly kind: ViewKind;
   readonly scope: ViewScope;
+  readonly root?: ViewReference;
   readonly order?: number;
   readonly title?: string;
+  readonly description?: string;
   readonly presentation?: ViewPresentationHints;
 }
 
@@ -230,16 +235,21 @@ function normalizeView(input: ViewInput): ViewSpec {
   const key = normalizeIdentityId(input.key) as ViewKey;
   const kind = readViewKind(input.kind);
   const scope = normalizeScope(input.scope);
+  const root = input.root === undefined ? undefined : normalizeReference(input.root);
   const order = normalizeOrder(input.order);
   const title = input.title === undefined ? undefined : normalizeText(input.title, "view title");
+  const description =
+    input.description === undefined ? undefined : normalizeText(input.description, "view description");
   const presentation = normalizePresentation(input.presentation);
 
   return Object.freeze({
     key,
     kind,
     scope,
+    ...(root === undefined ? {} : { root }),
     ...(order === undefined ? {} : { order }),
     ...(title === undefined ? {} : { title }),
+    ...(description === undefined ? {} : { description }),
     ...(presentation === undefined ? {} : { presentation }),
   });
 }

@@ -28,6 +28,7 @@ export const PROJECTION_LOSS_CODES = [
   "unsupported-view-reference",
   "unsupported-view-exclusion",
   "unsupported-view-scope",
+  "unsupported-view-root",
   "unsupported-presentation",
   "ambiguous-flow-step",
 ] as const;
@@ -598,9 +599,79 @@ function addUnsupportedViewReference(
   );
 }
 
-function renderStructuralView(context: ProjectionContext, view: ViewSpec, viewIndex: number): string[] {
-  const lines = [`        systemLandscape ${quote(viewKey(view.key))} {`];
+function addUnsupportedViewRoot(context: ProjectionContext, view: ViewSpec, viewIndex: number, message: string): void {
+  context.losses.add("unsupported-view-root", `views[${viewIndex}].root`, [view.key, view.root?.id ?? ""], message);
+}
+
+function renderViewMetadata(view: ViewSpec, lines: string[]): void {
   if (view.title !== undefined) lines.push(`            title ${quote(view.title)}`);
+  if (view.description !== undefined) lines.push(`            description ${quote(view.description)}`);
+}
+
+function declaredElementRoot(context: ProjectionContext, view: ViewSpec, viewIndex: number): ElementRecord | undefined {
+  if (view.root === undefined) return undefined;
+  if (view.root.kind !== "element") {
+    addUnsupportedViewRoot(
+      context,
+      view,
+      viewIndex,
+      `Structurizr ${view.kind} views require an element root, but Canon declared ${view.root.kind} ${view.root.id}`,
+    );
+    return undefined;
+  }
+  const root = context.document.elements.find((element) => element.id === view.root?.id);
+  if (root === undefined) {
+    addUnsupportedViewRoot(context, view, viewIndex, `Structurizr cannot resolve Canon view root ${view.root.id}`);
+  }
+  return root;
+}
+
+function structuralViewForm(
+  context: ProjectionContext,
+  root: ElementRecord,
+): { readonly type: "systemContext" | "container" | "component"; readonly scope: string } | undefined {
+  const rootIdentifier = context.elementIdentifiers.get(root.id);
+  const rootKind = context.elementDslKinds.get(root.id);
+  if (rootIdentifier === undefined) return undefined;
+
+  if (rootKind === "softwareSystem") return { type: "systemContext", scope: rootIdentifier };
+
+  const parent =
+    root.parentId === undefined ? undefined : context.document.elements.find((element) => element.id === root.parentId);
+  const parentIdentifier = parent === undefined ? undefined : context.elementIdentifiers.get(parent.id);
+  const parentKind = parent === undefined ? undefined : context.elementDslKinds.get(parent.id);
+  if (rootKind === "container" && parentIdentifier !== undefined) {
+    if (parentKind === "softwareSystem") return { type: "container", scope: parentIdentifier };
+    if (parentKind === "container") return { type: "component", scope: parentIdentifier };
+  }
+  if (rootKind === "component" && parentIdentifier !== undefined && parentKind === "container") {
+    return { type: "component", scope: parentIdentifier };
+  }
+  return undefined;
+}
+
+function renderStructuralView(context: ProjectionContext, view: ViewSpec, viewIndex: number): string[] {
+  let declaration: {
+    readonly type: "systemLandscape" | "systemContext" | "container" | "component";
+    readonly scope: string;
+  } = { type: "systemLandscape", scope: "*" };
+  if (view.root !== undefined) {
+    const root = declaredElementRoot(context, view, viewIndex);
+    if (root === undefined) return [];
+    const form = structuralViewForm(context, root);
+    if (form === undefined) {
+      addUnsupportedViewRoot(
+        context,
+        view,
+        viewIndex,
+        `Structurizr cannot represent Canon structural view root ${root.id} at its hierarchy level`,
+      );
+      return [];
+    }
+    declaration = form;
+  }
+  const lines = [`        ${declaration.type} ${declaration.scope} ${quote(viewKey(view.key))} {`];
+  renderViewMetadata(view, lines);
   renderPresentation(context, view, viewIndex, lines);
 
   for (const [mode, references] of [
@@ -700,26 +771,25 @@ function renderDynamicFlow(
 
 function renderDynamicView(context: ProjectionContext, view: ViewSpec, viewIndex: number): string[] {
   const flowIds = view.scope.include.filter((reference) => reference.kind === "flow").map((reference) => reference.id);
-  const includedElements = view.scope.include.filter((reference) => reference.kind === "element");
-  const supportedScopes = includedElements.filter((reference) => {
-    const kind = context.elementDslKinds.get(reference.id);
-    return kind === "softwareSystem" || kind === "container";
-  });
-
   let scope = "*";
-  if (supportedScopes.length === 1 && includedElements.length === 1) {
-    scope = context.elementIdentifiers.get(supportedScopes[0].id) as string;
-  } else if (includedElements.length > 0) {
-    context.losses.add(
-      "unsupported-view-scope",
-      `views[${viewIndex}].scope.include`,
-      includedElements.map((reference) => reference.id),
-      `Structurizr dynamic views have one scope, but Canon view ${view.key} declares multiple or incompatible element scopes`,
-    );
+  if (view.root !== undefined) {
+    const root = declaredElementRoot(context, view, viewIndex);
+    if (root === undefined) return [];
+    const rootKind = context.elementDslKinds.get(root.id);
+    if (rootKind !== "softwareSystem" && rootKind !== "container") {
+      addUnsupportedViewRoot(
+        context,
+        view,
+        viewIndex,
+        `Structurizr dynamic views cannot use Canon element ${root.id} as a view scope at hierarchy kind ${rootKind ?? "unknown"}`,
+      );
+      return [];
+    }
+    scope = context.elementIdentifiers.get(root.id) as string;
   }
 
   const lines = [`        dynamic ${scope} ${quote(viewKey(view.key))} {`];
-  if (view.title !== undefined) lines.push(`            title ${quote(view.title)}`);
+  renderViewMetadata(view, lines);
   renderPresentation(context, view, viewIndex, lines);
 
   for (let referenceIndex = 0; referenceIndex < view.scope.include.length; referenceIndex += 1) {
@@ -749,36 +819,39 @@ function renderDynamicView(context: ProjectionContext, view: ViewSpec, viewIndex
   return lines;
 }
 
-function deploymentEnvironmentForReference(context: ProjectionContext, reference: ViewReference): string | undefined {
-  if (reference.kind === "runtime-environment") return reference.id;
-  if (reference.kind === "deployment-node") {
-    return context.document.deployment.deploymentNodes.find((node) => node.id === reference.id)?.environmentId;
-  }
-  if (reference.kind === "deployment-instance") {
-    const instance = context.document.deployment.deploymentInstances.find((candidate) => candidate.id === reference.id);
-    return context.document.deployment.deploymentNodes.find((node) => node.id === instance?.nodeId)?.environmentId;
-  }
-  return undefined;
-}
-
 function renderDeploymentView(context: ProjectionContext, view: ViewSpec, viewIndex: number): string[] {
-  const environmentIds = new Set<string>();
-  for (const reference of view.scope.include) {
-    const environment = deploymentEnvironmentForReference(context, reference);
-    if (environment !== undefined) environmentIds.add(environment);
-  }
-
-  if (environmentIds.size !== 1) {
+  let environment: string | undefined;
+  if (view.root !== undefined) {
+    if (view.root.kind !== "runtime-environment") {
+      addUnsupportedViewRoot(
+        context,
+        view,
+        viewIndex,
+        `Structurizr deployment views require a runtime environment root, but Canon declared ${view.root.kind} ${view.root.id}`,
+      );
+      return [];
+    }
+    environment = view.root.id;
+  } else {
     context.losses.add(
       "unsupported-view-scope",
-      `views[${viewIndex}].scope`,
-      [view.key, ...environmentIds],
-      `Structurizr deployment views require exactly one Canon runtime environment for view ${view.key}`,
+      `views[${viewIndex}].root`,
+      [view.key],
+      `Structurizr deployment view ${view.key} has no declared Canon runtime environment root`,
     );
     return [];
   }
 
-  const environment = [...environmentIds][0];
+  if (environment === undefined) {
+    context.losses.add(
+      "unsupported-view-scope",
+      `views[${viewIndex}].scope`,
+      [view.key],
+      `Structurizr deployment views require a Canon runtime environment for view ${view.key}`,
+    );
+    return [];
+  }
+
   const elementScopes = view.scope.include.filter(
     (reference) => reference.kind === "element" && context.elementDslKinds.get(reference.id) === "softwareSystem",
   );
@@ -789,7 +862,7 @@ function renderDeploymentView(context: ProjectionContext, view: ViewSpec, viewIn
   const lines = [
     `        deployment ${scope} ${context.document.deployment.runtimeEnvironments.length > 0 ? (context.document.deployment.runtimeEnvironments.find((candidate) => candidate.id === environment) ? structurizrIdentifier("runtime-environment", environment) : quote(environment)) : quote(environment)} ${quote(viewKey(view.key))} {`,
   ];
-  if (view.title !== undefined) lines.push(`            title ${quote(view.title)}`);
+  renderViewMetadata(view, lines);
   renderPresentation(context, view, viewIndex, lines);
 
   for (const [mode, references] of [
@@ -951,7 +1024,12 @@ function addUnsupportedCanonSemantics(context: ProjectionContext): void {
   }
 }
 
-function renderWorkspace(context: ProjectionContext, views: readonly string[]): string {
+function renderWorkspace(context: ProjectionContext): {
+  readonly dsl: string;
+  readonly viewMappings: readonly StructurizrViewMapping[];
+} {
+  const elements = renderElements(context);
+  const renderedViews = renderViews(context);
   const document = context.document;
   const lines = [
     `workspace ${quote(document.documentId)} {`,
@@ -962,16 +1040,19 @@ function renderWorkspace(context: ProjectionContext, views: readonly string[]): 
     "    }",
     "    model {",
     "        !identifiers flat",
-    ...renderElements(context),
+    ...elements,
     ...renderRelationships(context),
     ...renderDeployment(context),
     "    }",
     "    views {",
-    ...views.map((line) => line),
+    ...renderedViews.lines,
     "    }",
     "}",
   ];
-  return `${lines.join("\n")}\n`;
+  return {
+    dsl: `${lines.join("\n")}\n`,
+    viewMappings: renderedViews.mappings,
+  };
 }
 
 /** Project a validated Architecture Canon into current Structurizr DSL plus explicit losses. */
@@ -984,15 +1065,15 @@ export function projectArchitectureDocumentToStructurizr(document: ArchitectureD
 
   const losses = new LossCollector();
   const context = createContext(document, losses);
-  const renderedViews = renderViews(context);
+  const workspace = renderWorkspace(context);
   addUnsupportedCanonSemantics(context);
 
   return Object.freeze({
     canonVersion: document.canonVersion,
     documentId: document.documentId,
-    dsl: renderWorkspace(context, renderedViews.lines),
+    dsl: workspace.dsl,
     identityMappings: addIdentityMappings(document),
-    viewMappings: renderedViews.mappings,
+    viewMappings: workspace.viewMappings,
     losses: losses.finish(),
   });
 }
