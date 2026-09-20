@@ -203,5 +203,5 @@ function runSkillCommand(args: readonly string[]): number {
 }
 
 function getVersion(): string {
-  return "0.2.0";
+  return "0.2.1";
 }

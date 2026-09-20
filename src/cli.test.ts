@@ -72,7 +72,7 @@ test("--version reports package version", async () => {
   try {
     const exitCode = await runCli(["--version"]);
     assert.equal(exitCode, 0);
-    assert.deepEqual(lines, ["0.2.0"]);
+    assert.deepEqual(lines, ["0.2.1"]);
   } finally {
     console.log = originalLog;
   }
