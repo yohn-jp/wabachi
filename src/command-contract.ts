@@ -19,6 +19,7 @@ export type CommandId =
   | "run.execute"
   | "matrix.execute"
   | "architecture.help"
+  | "architecture.example"
   | "architecture.validate"
   | "architecture.render"
   | "skill.index"
@@ -163,9 +164,18 @@ export const COMMANDS: readonly CommandDefinition[] = [
     "architecture",
     "help",
     ["architecture"],
-    "Discover Architecture Canon validation and npm-native React Flow + ELK rendering commands.",
+    "Discover the Architecture Canon shape, validation, and npm-native React Flow + ELK rendering commands.",
     ["help"],
     ["wabachi architecture --help"],
+  ),
+  command(
+    "architecture.example",
+    "architecture",
+    "example",
+    ["architecture", "example"],
+    "Print a minimal valid Architecture Canon example for explicit authoring.",
+    ["help"],
+    ["wabachi architecture example"],
   ),
   command(
     "architecture.validate",

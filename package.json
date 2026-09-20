@@ -11,6 +11,7 @@
     "README.md",
     "LICENSE",
     "docs/USAGE.md",
+    "docs/examples",
     "skills",
     ".codex-plugin"
   ],

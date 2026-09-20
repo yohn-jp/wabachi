@@ -83,7 +83,12 @@ function main() {
       : path.join(installDirectory, "node_modules", packageName);
     if (!fs.existsSync(installedPackageDirectory)) fail(`${packageName} was not installed under node_modules`);
 
-    for (const relativePath of ["docs/USAGE.md", "skills/wabachi/SKILL.md", ".codex-plugin/plugin.json"]) {
+    for (const relativePath of [
+      "docs/USAGE.md",
+      "docs/examples/minimal-canon.json",
+      "skills/wabachi/SKILL.md",
+      ".codex-plugin/plugin.json",
+    ]) {
       const bundledPath = path.join(installedPackageDirectory, relativePath);
       if (!fs.existsSync(bundledPath)) fail(`bundled asset is missing after install: ${relativePath}`);
     }
@@ -120,6 +125,28 @@ function main() {
 
     const architectureBin = binTargets.find(({ name }) => name === packageName) ?? binTargets[0];
     if (architectureBin === undefined) fail("installed package has no executable architecture renderer");
+    const exampleResult = spawnSync(path.join(binDirectory, architectureBin.name), ["architecture", "example"], {
+      cwd: installDirectory,
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    if (exampleResult.error) fail(`installed architecture example failed to start: ${exampleResult.error.message}`);
+    if (exampleResult.status !== 0) {
+      fail(
+        `installed architecture example exited ${exampleResult.status}:\n${exampleResult.stdout}\n${exampleResult.stderr}`,
+      );
+    }
+    try {
+      const example = JSON.parse(exampleResult.stdout);
+      if (example.documentId !== "minimal-architecture-canon") {
+        fail("installed architecture example returned an unexpected Canon");
+      }
+    } catch (error) {
+      fail(
+        `installed architecture example was not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
     const architectureCanon = path.join(repoRoot, "architecture", "wabachi.json");
     if (!fs.existsSync(architectureCanon)) fail(`architecture dogfood Canon is missing: ${architectureCanon}`);
     const architectureOutput = fs.mkdtempSync(path.join(os.tmpdir(), "smoke-architecture-"));

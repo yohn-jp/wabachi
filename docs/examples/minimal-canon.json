@@ -1,0 +1,24 @@
+{
+  "canonVersion": 1,
+  "documentId": "minimal-architecture-canon",
+  "root": { "kind": "architecture", "id": "architecture" },
+  "elements": [],
+  "interfaces": [],
+  "relationships": [],
+  "responsibilities": { "responsibilities": [] },
+  "authority": { "authority": [], "ownership": [] },
+  "boundaries": [],
+  "constraints": [],
+  "flows": [],
+  "deployment": {
+    "runtimeEnvironments": [],
+    "deploymentNodes": [],
+    "deploymentInstances": [],
+    "infrastructureReferences": [],
+    "mappings": []
+  },
+  "repositoryMappings": [],
+  "decisions": { "decisions": [], "references": [], "referenceAttachments": [] },
+  "views": [],
+  "globalIdentityRegistry": { "entries": [{ "id": "architecture", "namespace": "architecture" }] }
+}

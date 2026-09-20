@@ -62,7 +62,18 @@ installed Wabachi version.
 
 Architecture Canon authoring is an explicit file-editing step. Wabachi does
 not provide an init or edit command. Create or revise the Canon document using
-the repository's documented schema, then validate it before rendering.
+the repository's documented schema, then validate it before rendering. To
+discover the current Canon shape and obtain a minimal valid starting document,
+run the read-only example command:
+
+```bash
+wabachi architecture --help
+wabachi architecture example > ./architecture.json
+```
+
+The example is printed from the installed package and is not written by
+Wabachi. It is a starting point for explicit authoring, not an implicit init
+or edit workflow.
 
 ```bash
 wabachi architecture validate ./architecture.json

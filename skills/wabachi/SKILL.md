@@ -24,6 +24,7 @@ syntax for each command through its progressive help pointer, for example:
 
 ```bash
 wabachi architecture --help
+wabachi architecture example
 wabachi architecture validate --help
 wabachi architecture render ./architecture.json --out ./artifacts/site
 ```
