@@ -29,7 +29,8 @@ test("progressive help projects command and leaf options", async () => {
   try {
     assert.equal(await runCli(["architecture", "render", "--help"]), 0);
     assert.match(lines[0] ?? "", /architecture render <file>/u);
-    assert.match(lines[0] ?? "", /--structurizr-command/u);
+    assert.match(lines[0] ?? "", /React Flow \+ ELK/u);
+    assert.doesNotMatch(lines[0] ?? "", /--structurizr-command/u);
 
     lines.length = 0;
     assert.equal(await runCli(["architecture", "--help=json"]), 0);

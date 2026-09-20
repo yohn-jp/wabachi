@@ -25,6 +25,11 @@ syntax for each command through its progressive help pointer, for example:
 ```bash
 wabachi architecture --help
 wabachi architecture validate --help
+wabachi architecture render ./architecture.json --out ./artifacts/site
 ```
+
+Architecture rendering is npm-native and uses the bundled React Flow + ELK
+renderer. The default render path does not require Java, Docker, Chromium,
+Structurizr, CDN, or network access.
 
 Use `--json` on `skill` or help when a machine-readable projection is needed.
