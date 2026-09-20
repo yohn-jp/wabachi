@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { promisify } from "node:util";
 import type { ResolvedRepository } from "./provider.js";
@@ -53,22 +53,27 @@ export async function createIsolatedWorkspace(resolution: RepositoryResolution, 
   await mkdir(workspaceRoot, { recursive: true });
 
   await new Promise<void>((resolve, reject) => {
-    const gitArchive = execFile(
-      "git",
-      ["archive", resolution.resolved.commitSha],
-      { cwd: resolution.archiveDir, maxBuffer: 1024 * 1024 * 1024 },
-      (error) => {
-        if (error) reject(error);
-      },
-    );
-    const tar = execFile("tar", ["-x", "-C", workspaceRoot], (error) => {
-      if (error) reject(error);
-      else resolve();
+    const gitArchive = spawn("git", ["archive", resolution.resolved.commitSha], {
+      cwd: resolution.archiveDir,
     });
-    if (!gitArchive.stdout || !tar.stdin) {
-      reject(new Error("failed to pipe git archive into tar"));
-      return;
-    }
+    const tar = spawn("tar", ["-x", "-C", workspaceRoot]);
+
+    let gitArchiveStderr = "";
+    gitArchive.stderr.on("data", (chunk) => {
+      gitArchiveStderr += chunk;
+    });
+    gitArchive.on("error", reject);
+
+    let tarStderr = "";
+    tar.stderr.on("data", (chunk) => {
+      tarStderr += chunk;
+    });
+    tar.on("error", reject);
+    tar.on("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`tar exited with code ${code}: ${tarStderr || gitArchiveStderr}`));
+    });
+
     gitArchive.stdout.pipe(tar.stdin);
   });
 }
