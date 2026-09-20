@@ -38,9 +38,9 @@ reviewed. The command prints the manifest path. Keep the directory named by
 
 ## Build a provider matrix
 
-`matrix` runs the matrix workflow for one revision and requires retained output
-artifacts. A full 40-character commit SHA is the safest input for reproducible
-evidence.
+`matrix` runs the matrix workflow for one explicit revision and requires a
+retained output directory. Pass a full 40-character commit SHA with
+`--revision`; unlike `run`, `matrix` never falls back to `HEAD`.
 
 ```bash
 wabachi matrix . --revision 0123456789abcdef0123456789abcdef01234567 --out ./artifacts/matrix
@@ -52,7 +52,7 @@ configured provider workflow, pass a JSON configuration file with the source,
 revision, provider IDs, and addition order:
 
 ```bash
-wabachi matrix --config ./matrix-workflow.json
+wabachi matrix --config ./matrix-workflow.json --out ./artifacts/matrix
 ```
 
 The configured provider set must match the providers registered by the

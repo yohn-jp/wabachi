@@ -37,6 +37,14 @@ test("the command contract covers the supported Wabachi surface", () => {
     commandUsage("architecture.render"),
     "usage: wabachi architecture render [file] [--help[=full|json]] [--out <dir>] [--json]",
   );
+  assert.equal(
+    commandUsage("matrix.execute"),
+    "usage: wabachi matrix <repository> [--help[=full|json]] --revision <ref> --out <dir> [--config <path>]",
+  );
+  assert.equal(
+    commandUsage("run.execute"),
+    "usage: wabachi run <repository> [--help[=full|json]] [--revision <ref>] [--out <dir>]",
+  );
   assert.doesNotMatch(commandUsage("architecture.render"), /structurizr/u);
   assert.match(projectCommandHelp(["architecture", "render", "canon.json"])?.summary ?? "", /React Flow \+ ELK/u);
   assert.equal(commandExample("matrix.execute"), "wabachi matrix <repository> --revision <sha> --out <dir>");
@@ -70,6 +78,15 @@ test("progressive help resolves root, domain, and leaf projections", () => {
     leaf?.options.map((option) => option.id),
     ["help", "out", "json"],
   );
+
+  const matrix = projectCommandHelp(["matrix"]);
+  assert.equal(matrix?.usage, commandUsage("matrix.execute"));
+  assert.equal(matrix?.options.find((option) => option.id === "revision")?.syntax, "--revision <ref>");
+  assert.equal(matrix?.options.find((option) => option.id === "out")?.syntax, "--out <dir>");
+
+  const run = projectCommandHelp(["run"]);
+  assert.equal(run?.usage, commandUsage("run.execute"));
+  assert.equal(run?.usage.includes("[--revision <ref>]"), true);
 });
 
 test("help parsing ignores option values and derives the command path", () => {

@@ -157,8 +157,9 @@ export const COMMANDS: readonly CommandDefinition[] = [
     ["matrix"],
     "Run providers and retain auditable facts, correlations, matrices, and reports.",
     ["help", "revision", "out", "config"],
-    ["wabachi matrix <repository> --revision <sha> --out <dir>", "wabachi matrix --config <path>"],
+    ["wabachi matrix <repository> --revision <sha> --out <dir>", "wabachi matrix --config <path> --out <dir>"],
     "<repository>",
+    ["revision", "out"],
   ),
   command(
     "architecture.help",
