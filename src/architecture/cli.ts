@@ -38,6 +38,10 @@ function errorMessage(error: unknown): string {
   return bounded(error instanceof Error ? error.message : String(error));
 }
 
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
 function parseArguments(
   args: readonly string[],
 ):
@@ -131,6 +135,12 @@ export async function runArchitectureCli(args: readonly string[]): Promise<numbe
   try {
     document = parseCanonicalArchitectureDocument(await readFile(file, "utf8"));
   } catch (error) {
+    if (isMissingFileError(error)) {
+      return writeFailure(command, json, {
+        code: "invalid-canon",
+        message: `architecture document not found: ${file}`,
+      });
+    }
     return writeFailure(command, json, { code: "invalid-canon", message: errorMessage(error) });
   }
 
