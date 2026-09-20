@@ -78,8 +78,8 @@ async function writeMockGraftBinary(dir: string): Promise<string> {
     [
       "#!/usr/bin/env node",
       `const wiring = ${JSON.stringify(MOCK_WIRING)};`,
-      "const fs = require('node:fs');",
-      "const path = require('node:path');",
+      "import * as fs from 'node:fs';",
+      "import * as path from 'node:path';",
       "const args = process.argv.slice(2);",
       "if (args[0] === '--version') { console.log('graft-mock/1.2.3'); process.exit(0); }",
       "if (args[0] === 'build') {",
