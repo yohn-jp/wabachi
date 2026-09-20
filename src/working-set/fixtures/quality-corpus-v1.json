@@ -1,0 +1,208 @@
+{
+  "kind": "working-set-quality-corpus",
+  "schemaVersion": 1,
+  "corpusId": "working-set-quality-v1",
+  "repository": {
+    "repositoryHost": "github.com",
+    "repositoryId": "1335559861",
+    "repository": "yohn-jp/wabachi"
+  },
+  "revision": "17e8e953ba10837bb6ebd9aa0daec34ed79c7b67",
+  "cases": [
+    {
+      "caseId": "over-inclusion-and-missing-context",
+      "description": "A candidate includes an unrelated file and misses labeled dependency and verification context.",
+      "revision": "17e8e953ba10837bb6ebd9aa0daec34ed79c7b67",
+      "candidate": {
+        "kind": "candidate-working-set",
+        "schemaVersion": 1,
+        "workingSetId": "quality-over-inclusion",
+        "repository": {
+          "repositoryHost": "github.com",
+          "repositoryId": "1335559861",
+          "repository": "yohn-jp/wabachi"
+        },
+        "revision": "17e8e953ba10837bb6ebd9aa0daec34ed79c7b67",
+        "entries": [
+          {
+            "state": "required",
+            "target": { "kind": "file", "locator": "src/entry.ts" },
+            "reason": { "id": "seed:path", "summary": "validated working-set seed" },
+            "evidence": [{ "artifact": "working-set-seeds", "reference": "path:src/entry.ts" }]
+          },
+          {
+            "state": "supporting",
+            "target": { "kind": "file", "locator": "src/extra.ts" },
+            "reason": { "id": "canon:uses:entry:extra", "summary": "Architecture Canon uses relationship" },
+            "evidence": [{ "artifact": "canon", "reference": "entry:uses:src/extra.ts" }]
+          }
+        ]
+      },
+      "initialTargets": [{ "kind": "file", "locator": "src/entry.ts" }],
+      "legitimateTargets": [
+        { "kind": "file", "locator": "src/dependency.ts" },
+        { "kind": "file", "locator": "src/entry.ts" },
+        { "kind": "test", "locator": "test/entry.test.ts#entry" }
+      ],
+      "expansionTargets": [
+        { "kind": "file", "locator": "src/dependency.ts" },
+        { "kind": "test", "locator": "test/entry.test.ts#entry" }
+      ],
+      "verificationTargets": [{ "kind": "test", "locator": "test/entry.test.ts#entry" }],
+      "pruning": {
+        "beforeTargets": [
+          { "kind": "file", "locator": "src/dead.ts" },
+          { "kind": "file", "locator": "src/entry.ts" },
+          { "kind": "file", "locator": "src/extra.ts" }
+        ],
+        "afterTargets": [
+          { "kind": "file", "locator": "src/entry.ts" },
+          { "kind": "file", "locator": "src/extra.ts" }
+        ]
+      },
+      "behavioralProxies": {
+        "observedExpansionTargets": [{ "kind": "file", "locator": "src/extra.ts" }],
+        "observedReadTargets": [
+          { "kind": "file", "locator": "src/entry.ts" },
+          { "kind": "file", "locator": "src/extra.ts" }
+        ]
+      }
+    },
+    {
+      "caseId": "provider-conflict",
+      "description": "A provider-supported dependency is retained while a provider disagreement remains unresolved.",
+      "revision": "17e8e953ba10837bb6ebd9aa0daec34ed79c7b67",
+      "candidate": {
+        "kind": "candidate-working-set",
+        "schemaVersion": 1,
+        "workingSetId": "quality-provider-conflict",
+        "repository": {
+          "repositoryHost": "github.com",
+          "repositoryId": "1335559861",
+          "repository": "yohn-jp/wabachi"
+        },
+        "revision": "17e8e953ba10837bb6ebd9aa0daec34ed79c7b67",
+        "entries": [
+          {
+            "state": "required",
+            "target": { "kind": "file", "locator": "src/service.ts" },
+            "reason": { "id": "seed:path", "summary": "validated working-set seed" },
+            "evidence": [{ "artifact": "working-set-seeds", "reference": "path:src/service.ts" }]
+          },
+          {
+            "state": "supporting",
+            "target": { "kind": "file", "locator": "src/provider.ts" },
+            "reason": { "id": "provider:imports:fact-1", "summary": "admitted provider relationship evidence" },
+            "evidence": [
+              { "artifact": "provider-correlation", "reference": "provider-component" },
+              { "artifact": "provider-fact", "reference": "fact-1" }
+            ]
+          },
+          {
+            "state": "unresolved",
+            "target": { "kind": "unresolved", "locator": "conflict:disagreement:subject:calls" },
+            "reason": {
+              "id": "conflict:disagreement",
+              "summary": "provider evidence disagrees about the candidate context"
+            },
+            "evidence": [
+              { "artifact": "provider-fact", "reference": "fact-1" },
+              { "artifact": "provider-fact", "reference": "fact-2" }
+            ]
+          }
+        ]
+      },
+      "initialTargets": [{ "kind": "file", "locator": "src/service.ts" }],
+      "legitimateTargets": [
+        { "kind": "file", "locator": "src/provider.ts" },
+        { "kind": "file", "locator": "src/service.ts" }
+      ],
+      "expansionTargets": [{ "kind": "file", "locator": "src/provider.ts" }],
+      "behavioralProxies": {
+        "observedExpansionTargets": [
+          { "kind": "file", "locator": "src/provider.ts" },
+          { "kind": "file", "locator": "src/unused.ts" }
+        ],
+        "observedReadTargets": [
+          { "kind": "file", "locator": "src/provider.ts" },
+          { "kind": "file", "locator": "src/service.ts" },
+          { "kind": "file", "locator": "src/unused.ts" }
+        ]
+      }
+    },
+    {
+      "caseId": "seed-expansion-and-verification",
+      "description": "A seed expands to a legitimate dependency and Canon-mapped verification context.",
+      "revision": "17e8e953ba10837bb6ebd9aa0daec34ed79c7b67",
+      "candidate": {
+        "kind": "candidate-working-set",
+        "schemaVersion": 1,
+        "workingSetId": "quality-seed-expansion",
+        "repository": {
+          "repositoryHost": "github.com",
+          "repositoryId": "1335559861",
+          "repository": "yohn-jp/wabachi"
+        },
+        "revision": "17e8e953ba10837bb6ebd9aa0daec34ed79c7b67",
+        "entries": [
+          {
+            "state": "required",
+            "target": { "kind": "file", "locator": "src/app.ts" },
+            "reason": { "id": "seed:path", "summary": "validated working-set seed" },
+            "evidence": [{ "artifact": "working-set-seeds", "reference": "path:src/app.ts" }]
+          },
+          {
+            "state": "supporting",
+            "target": { "kind": "file", "locator": "src/dependency.ts" },
+            "reason": { "id": "provider:calls:fact-7", "summary": "admitted provider relationship evidence" },
+            "evidence": [
+              { "artifact": "canon", "reference": "app:depends-on:dependency" },
+              { "artifact": "provider-fact", "reference": "fact-7" }
+            ]
+          },
+          {
+            "state": "verification",
+            "target": { "kind": "test", "locator": "test/dependency.test.ts#dependency" },
+            "reason": {
+              "id": "verification:dependency:test/dependency.test.ts#dependency",
+              "summary": "Canon-mapped verification context"
+            },
+            "evidence": [{ "artifact": "canon", "reference": "dependency:test:test/dependency.test.ts#dependency" }]
+          }
+        ]
+      },
+      "initialTargets": [{ "kind": "file", "locator": "src/app.ts" }],
+      "legitimateTargets": [
+        { "kind": "file", "locator": "src/app.ts" },
+        { "kind": "file", "locator": "src/dependency.ts" },
+        { "kind": "test", "locator": "test/dependency.test.ts#dependency" }
+      ],
+      "expansionTargets": [
+        { "kind": "file", "locator": "src/dependency.ts" },
+        { "kind": "test", "locator": "test/dependency.test.ts#dependency" }
+      ],
+      "verificationTargets": [{ "kind": "test", "locator": "test/dependency.test.ts#dependency" }],
+      "pruning": {
+        "beforeTargets": [
+          { "kind": "file", "locator": "src/app.ts" },
+          { "kind": "file", "locator": "src/dependency.ts" },
+          { "kind": "file", "locator": "src/unrelated.ts" },
+          { "kind": "test", "locator": "test/dependency.test.ts#dependency" }
+        ],
+        "afterTargets": [
+          { "kind": "file", "locator": "src/app.ts" },
+          { "kind": "file", "locator": "src/dependency.ts" },
+          { "kind": "test", "locator": "test/dependency.test.ts#dependency" }
+        ]
+      },
+      "behavioralProxies": {
+        "observedExpansionTargets": [{ "kind": "file", "locator": "src/dependency.ts" }],
+        "observedReadTargets": [
+          { "kind": "file", "locator": "src/app.ts" },
+          { "kind": "file", "locator": "src/dependency.ts" }
+        ],
+        "observedVerificationTargets": [{ "kind": "test", "locator": "test/dependency.test.ts#dependency" }]
+      }
+    }
+  ]
+}
