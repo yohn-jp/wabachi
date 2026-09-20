@@ -147,16 +147,16 @@ function main() {
       );
     }
 
-    const architectureCanon = path.join(repoRoot, "architecture", "wabachi.json");
+    const architectureCanon = path.join(repoRoot, ".wabachi", "architecture.json");
     if (!fs.existsSync(architectureCanon)) fail(`architecture dogfood Canon is missing: ${architectureCanon}`);
     const architectureOutput = fs.mkdtempSync(path.join(os.tmpdir(), "smoke-architecture-"));
     try {
-      console.log("rendering architecture/wabachi.json through the installed launcher...");
+      console.log("rendering .wabachi/architecture.json through the installed launcher...");
       const renderResult = spawnSync(
         path.join(binDirectory, architectureBin.name),
-        ["architecture", "render", architectureCanon, "--out", architectureOutput, "--json"],
+        ["architecture", "render", "--out", architectureOutput, "--json"],
         {
-          cwd: installDirectory,
+          cwd: repoRoot,
           encoding: "utf8",
           timeout: 30_000,
           env: { ...process.env, PATH: path.dirname(process.execPath) },

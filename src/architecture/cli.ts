@@ -4,7 +4,7 @@ import { parseCanonicalArchitectureDocument } from "./canon/codec.js";
 import { projectArchitectureDocument } from "./documentation/project.js";
 import { ArchitectureSiteError, buildArchitectureSite } from "./documentation/site.js";
 import { projectArchitectureDocumentToReactFlow } from "./projection/react-flow.js";
-import { commandUsage } from "../command-contract.js";
+import { commandUsage, DEFAULT_ARCHITECTURE_CANON_PATH } from "../command-contract.js";
 
 const MAX_DIAGNOSTIC_LENGTH = 240;
 
@@ -75,7 +75,6 @@ function parseArguments(
   if (command === "example" && file !== undefined) {
     return { ok: false, json, message: "architecture example does not accept a file" };
   }
-  if (command !== "example" && file === undefined) return { ok: false, json, message: usage(command) };
   if (command === "validate" && outputRoot !== undefined) {
     return { ok: false, json, message: "validate does not accept render options" };
   }
@@ -115,7 +114,7 @@ export async function runArchitectureCli(args: readonly string[]): Promise<numbe
   const parsed = parseArguments(args);
   if (!parsed.ok) return writeUsageFailure(parsed.json, parsed.message);
 
-  const { command, file, json } = parsed.value;
+  const { command, json } = parsed.value;
   if (command === "example") {
     try {
       const source = await readFile(new URL("../../docs/examples/minimal-canon.json", import.meta.url), "utf8");
@@ -127,9 +126,10 @@ export async function runArchitectureCli(args: readonly string[]): Promise<numbe
     }
   }
 
+  const file = parsed.value.file ?? DEFAULT_ARCHITECTURE_CANON_PATH;
   let document;
   try {
-    document = parseCanonicalArchitectureDocument(await readFile(file as string, "utf8"));
+    document = parseCanonicalArchitectureDocument(await readFile(file, "utf8"));
   } catch (error) {
     return writeFailure(command, json, { code: "invalid-canon", message: errorMessage(error) });
   }

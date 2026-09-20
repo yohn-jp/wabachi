@@ -25,9 +25,12 @@ syntax for each command through its progressive help pointer, for example:
 ```bash
 wabachi architecture --help
 wabachi architecture example
-wabachi architecture validate --help
-wabachi architecture render ./architecture.json --out ./artifacts/site
+wabachi architecture validate
+wabachi architecture render --out ./artifacts/site
 ```
+
+Omitted-file validation and rendering use `.wabachi/architecture.json` only.
+Pass an explicit Canon path to either command when overriding that default.
 
 Architecture rendering is npm-native and uses the bundled React Flow + ELK
 renderer. The default render path does not require Java, Docker, Chromium,

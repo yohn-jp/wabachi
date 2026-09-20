@@ -9,6 +9,7 @@
 export const COMMAND_CONTRACT_VERSION = "1.0.0" as const;
 export const COMMAND_CONTRACT_ID = `urn:wabachi:command-contract:${COMMAND_CONTRACT_VERSION}` as const;
 export const CLI_NAME = "wabachi" as const;
+export const DEFAULT_ARCHITECTURE_CANON_PATH = ".wabachi/architecture.json" as const;
 
 export type CommandDomain = "root" | "run" | "matrix" | "architecture" | "skill";
 export type OptionValueType = "boolean" | "string";
@@ -182,20 +183,20 @@ export const COMMANDS: readonly CommandDefinition[] = [
     "architecture",
     "validate",
     ["architecture", "validate"],
-    "Validate one explicit Architecture Canon document.",
+    "Validate the Architecture Canon at .wabachi/architecture.json or one explicit file.",
     ["help", "json"],
-    ["wabachi architecture validate <file> --json"],
-    "<file>",
+    ["wabachi architecture validate", "wabachi architecture validate <file> --json"],
+    "[file]",
   ),
   command(
     "architecture.render",
     "architecture",
     "render",
     ["architecture", "render"],
-    "Render one explicit Architecture Canon document as a React Flow + ELK static site.",
+    "Render the Architecture Canon at .wabachi/architecture.json or one explicit file as a React Flow + ELK static site.",
     ["help", "out", "json"],
-    ["wabachi architecture render <file> --out <dir>", "wabachi architecture render <file> --out <dir> --json"],
-    "<file>",
+    ["wabachi architecture render --out <dir>", "wabachi architecture render <file> --out <dir> --json"],
+    "[file]",
   ),
   command(
     "skill.index",
