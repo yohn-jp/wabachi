@@ -138,6 +138,34 @@ test("records a failed provider without affecting other providers' evidence", as
   assert.ok(JSON.parse(okArtifact));
 });
 
+test("records bounded external-process diagnostics for provider failures", async () => {
+  const runRoot = await newRunRoot();
+  const failingProvider: Provider = {
+    identity: { id: "process-failure", version: "0.0.1", determinism: "deterministic" },
+    async isAvailable(): Promise<boolean> {
+      return true;
+    },
+    async execute(): Promise<ProviderExecutionResult> {
+      throw Object.assign(new Error("Command failed"), {
+        code: 17,
+        cmd: "tool --check",
+        stderr: "provider stderr detail",
+      });
+    },
+  };
+
+  const { manifest } = await run({
+    source: fixtureRepoDir,
+    runRoot,
+    providers: [failingProvider],
+  });
+
+  assert.equal(
+    manifest.providers[0]?.result.error,
+    "provider process failed: tool --check (exit 17) stderr: provider stderr detail",
+  );
+});
+
 test("isolates each provider's raw artifacts under its own directory", async () => {
   const runRoot = await newRunRoot();
   await run({
