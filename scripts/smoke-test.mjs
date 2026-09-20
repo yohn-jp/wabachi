@@ -118,6 +118,40 @@ function main() {
       if (versionResult.stdout.trim().length === 0) fail(`launcher "${name}" --version printed nothing`);
     }
 
+    const architectureBin = binTargets.find(({ name }) => name === packageName) ?? binTargets[0];
+    if (architectureBin === undefined) fail("installed package has no executable architecture renderer");
+    const architectureCanon = path.join(repoRoot, "architecture", "wabachi.json");
+    if (!fs.existsSync(architectureCanon)) fail(`architecture dogfood Canon is missing: ${architectureCanon}`);
+    const architectureOutput = fs.mkdtempSync(path.join(os.tmpdir(), "smoke-architecture-"));
+    try {
+      console.log("rendering architecture/wabachi.json through the installed launcher...");
+      const renderResult = spawnSync(
+        path.join(binDirectory, architectureBin.name),
+        ["architecture", "render", architectureCanon, "--out", architectureOutput, "--json"],
+        {
+          cwd: installDirectory,
+          encoding: "utf8",
+          timeout: 30_000,
+          env: { ...process.env, PATH: path.dirname(process.execPath) },
+        },
+      );
+      if (renderResult.error) fail(`installed architecture render failed to start: ${renderResult.error.message}`);
+      if (renderResult.status !== 0) {
+        fail(
+          `installed architecture render exited ${renderResult.status}:\n${renderResult.stdout}\n${renderResult.stderr}`,
+        );
+      }
+      const renderReport = JSON.parse(renderResult.stdout.trim());
+      if (renderReport.ok !== true) fail("installed architecture render did not report success");
+      for (const relativePath of ["index.html", "diagrams/index.html", "diagrams/wabachi-react-flow.css"]) {
+        if (!fs.existsSync(path.join(architectureOutput, relativePath))) {
+          fail(`installed architecture render did not create ${relativePath}`);
+        }
+      }
+    } finally {
+      fs.rmSync(architectureOutput, { recursive: true, force: true });
+    }
+
     console.log("smoke test passed.");
   } finally {
     fs.rmSync(installDirectory, { recursive: true, force: true });

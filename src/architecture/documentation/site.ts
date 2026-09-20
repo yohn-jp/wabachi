@@ -1,52 +1,55 @@
 import { lstat, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { renderDocumentationHtml } from "./html.js";
+import { renderReactFlowStatic, type ReactFlowStaticRenderResult } from "./react-flow.js";
 import type { DocumentationModel } from "./model.js";
-import {
-  runStructurizrStaticExport,
-  type StructurizrLauncher,
-  type StructurizrStaticExportRequest,
-  type StructurizrStaticExportResult,
-} from "../projection/structurizr-export.js";
-import type { ProjectionLoss, StructurizrProjection } from "../projection/structurizr.js";
+import type { ReactFlowProjection, ReactFlowProjectionLoss } from "../projection/react-flow.js";
+
+const HTML_ESCAPE_PATTERN = /[&<>"']/g;
+const HTML_ESCAPES: Readonly<Record<string, string>> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+function escapeHtml(value: string): string {
+  return value.replace(HTML_ESCAPE_PATTERN, (character) => HTML_ESCAPES[character] ?? character);
+}
 
 export const ARCHITECTURE_SITE_LAYOUT = Object.freeze({
   indexHtml: "index.html",
-  workspaceDsl: "workspace.dsl",
   projectionLosses: "projection-losses.json",
   diagramsDirectory: "diagrams",
+  diagramsIndexHtml: "diagrams/index.html",
+  diagramsStylesheet: "diagrams/wabachi-react-flow.css",
 });
-
-export type StructurizrStaticExportAdapter = (
-  request: StructurizrStaticExportRequest,
-) => Promise<StructurizrStaticExportResult>;
 
 export interface ArchitectureSiteRequest {
   /** An absolute, caller-owned directory for all site artifacts. */
   readonly outputRoot: string;
   readonly documentation: DocumentationModel;
-  readonly structurizr: StructurizrProjection;
-  readonly launcher: StructurizrLauncher;
-  readonly exportAdapter?: StructurizrStaticExportAdapter;
+  readonly reactFlow: ReactFlowProjection;
 }
 
 export interface ArchitectureSiteArtifacts {
   readonly root: string;
   readonly indexHtml: string;
-  readonly workspaceDsl: string;
   readonly projectionLosses: string;
   readonly diagramsDirectory: string;
+  readonly diagramsIndexHtml: string;
+  readonly diagramsStylesheet: string;
 }
 
 export interface ArchitectureSiteResult {
-  readonly status: "ok" | "export-failed";
-  readonly complete: boolean;
+  readonly status: "ok";
+  readonly complete: true;
   readonly outputRoot: string;
   readonly canonVersion: DocumentationModel["canonVersion"];
   readonly documentId: DocumentationModel["documentId"];
-  readonly losses: readonly ProjectionLoss[];
+  readonly losses: readonly ReactFlowProjectionLoss[];
   readonly artifacts: ArchitectureSiteArtifacts;
-  readonly export: StructurizrStaticExportResult;
 }
 
 export type ArchitectureSiteErrorCode = "invalid-input" | "generation-mismatch" | "unsafe-path" | "unsafe-overwrite";
@@ -89,9 +92,10 @@ function artifactPaths(outputRoot: string): ArchitectureSiteArtifacts {
   return Object.freeze({
     root: outputRoot,
     indexHtml: assertInsideRoot(outputRoot, ARCHITECTURE_SITE_LAYOUT.indexHtml),
-    workspaceDsl: assertInsideRoot(outputRoot, ARCHITECTURE_SITE_LAYOUT.workspaceDsl),
     projectionLosses: assertInsideRoot(outputRoot, ARCHITECTURE_SITE_LAYOUT.projectionLosses),
     diagramsDirectory: assertInsideRoot(outputRoot, ARCHITECTURE_SITE_LAYOUT.diagramsDirectory),
+    diagramsIndexHtml: assertInsideRoot(outputRoot, ARCHITECTURE_SITE_LAYOUT.diagramsIndexHtml),
+    diagramsStylesheet: assertInsideRoot(outputRoot, ARCHITECTURE_SITE_LAYOUT.diagramsStylesheet),
   });
 }
 
@@ -111,7 +115,12 @@ async function prepareOutput(artifacts: ArchitectureSiteArtifacts): Promise<void
     throw new ArchitectureSiteError("unsafe-path", "site output root is not a stable directory");
   }
 
-  for (const target of [artifacts.indexHtml, artifacts.workspaceDsl, artifacts.projectionLosses]) {
+  for (const target of [
+    artifacts.indexHtml,
+    artifacts.projectionLosses,
+    artifacts.diagramsIndexHtml,
+    artifacts.diagramsStylesheet,
+  ]) {
     const kind = await entryKind(target);
     if (kind !== "missing") {
       throw new ArchitectureSiteError("unsafe-overwrite", `refusing to overwrite existing site artifact: ${target}`);
@@ -129,11 +138,11 @@ async function prepareOutput(artifacts: ArchitectureSiteArtifacts): Promise<void
   await mkdir(artifacts.diagramsDirectory);
 }
 
-function assertCompatibleGeneration(documentation: DocumentationModel, structurizr: StructurizrProjection): void {
-  if (documentation.canonVersion !== structurizr.canonVersion || documentation.documentId !== structurizr.documentId) {
+function assertCompatibleGeneration(documentation: DocumentationModel, reactFlow: ReactFlowProjection): void {
+  if (documentation.canonVersion !== reactFlow.canonVersion || documentation.documentId !== reactFlow.documentId) {
     throw new ArchitectureSiteError(
       "generation-mismatch",
-      "documentation and Structurizr projections must originate from the same Canon generation",
+      "documentation and React Flow projections must originate from the same Canon generation",
     );
   }
 }
@@ -143,13 +152,13 @@ function siteNavigation(lossCount: number): string {
 <h2>Wabachi architecture site</h2>
 <nav aria-label="architecture-site"><ul>
 <li><a href="index.html">Documentation</a></li>
-<li><a href="diagrams/index.html">Structurizr diagrams</a></li>
+<li><a href="diagrams/index.html">React Flow diagrams</a></li>
 <li><a href="projection-losses.json">Projection losses (${String(lossCount)})</a></li>
 </ul></nav>
 </aside>`;
 }
 
-function composeIndex(documentation: DocumentationModel, losses: readonly ProjectionLoss[]): string {
+function composeIndex(documentation: DocumentationModel, losses: readonly ReactFlowProjectionLoss[]): string {
   const rendered = renderDocumentationHtml(documentation);
   const closingBody = "</body>";
   const insertionPoint = rendered.lastIndexOf(closingBody);
@@ -160,7 +169,22 @@ function composeIndex(documentation: DocumentationModel, losses: readonly Projec
   return `${rendered.slice(0, insertionPoint)}${siteNavigation(losses.length)}\n${rendered.slice(insertionPoint)}`;
 }
 
-function projectionLossReport(projection: StructurizrProjection): string {
+function composeDiagrams(documentId: string, rendered: ReactFlowStaticRenderResult): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(documentId)} React Flow diagrams</title>
+<link rel="stylesheet" href="wabachi-react-flow.css">
+</head>
+<body>
+${rendered.markup}
+</body>
+</html>`;
+}
+
+function projectionLossReport(projection: ReactFlowProjection): string {
   return `${JSON.stringify(
     {
       canonVersion: projection.canonVersion,
@@ -172,44 +196,45 @@ function projectionLossReport(projection: StructurizrProjection): string {
   )}\n`;
 }
 
-/** Assemble the independent documentation and Structurizr projections at one filesystem edge. */
+/** Assemble documentation and the first-party React Flow projection at one filesystem edge. */
 export async function buildArchitectureSite(request: ArchitectureSiteRequest): Promise<ArchitectureSiteResult> {
   if (!path.isAbsolute(request.outputRoot) || request.outputRoot.length === 0) {
     throw new ArchitectureSiteError("invalid-input", "site output root must be a non-empty absolute path");
   }
 
-  assertCompatibleGeneration(request.documentation, request.structurizr);
+  assertCompatibleGeneration(request.documentation, request.reactFlow);
+  const rendered = renderReactFlowStatic(request.reactFlow);
   const outputRoot = path.resolve(request.outputRoot);
   const artifacts = artifactPaths(outputRoot);
   await prepareOutput(artifacts);
 
-  await writeFile(artifacts.indexHtml, composeIndex(request.documentation, request.structurizr.losses), {
+  await writeFile(artifacts.indexHtml, composeIndex(request.documentation, request.reactFlow.losses), {
     encoding: "utf8",
     flag: "wx",
   });
-  await writeFile(artifacts.workspaceDsl, request.structurizr.dsl, { encoding: "utf8", flag: "wx" });
-  await writeFile(artifacts.projectionLosses, projectionLossReport(request.structurizr), {
+  await writeFile(artifacts.projectionLosses, projectionLossReport(request.reactFlow), {
     encoding: "utf8",
     flag: "wx",
   });
-
-  const exportRequest: StructurizrStaticExportRequest = {
-    launcher: request.launcher,
-    workspacePath: artifacts.workspaceDsl,
-    outputDirectory: artifacts.diagramsDirectory,
-  };
-  const exportResult = await (request.exportAdapter ?? runStructurizrStaticExport)(exportRequest);
-  const complete = exportResult.status === "ok";
+  await writeFile(artifacts.diagramsIndexHtml, composeDiagrams(request.reactFlow.documentId, rendered), {
+    encoding: "utf8",
+    flag: "wx",
+  });
+  for (const asset of rendered.assets) {
+    await writeFile(assertInsideRoot(artifacts.diagramsDirectory, asset.path), asset.content, {
+      encoding: "utf8",
+      flag: "wx",
+    });
+  }
 
   return Object.freeze({
-    status: complete ? "ok" : "export-failed",
-    complete,
+    status: "ok" as const,
+    complete: true as const,
     outputRoot,
     canonVersion: request.documentation.canonVersion,
     documentId: request.documentation.documentId,
-    losses: request.structurizr.losses,
+    losses: request.reactFlow.losses,
     artifacts,
-    export: exportResult,
   });
 }
 

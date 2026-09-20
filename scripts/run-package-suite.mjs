@@ -50,10 +50,11 @@ function main() {
   if (!fs.existsSync(distEntry)) throw new Error("dist is missing; run pnpm run build before the package suite");
 
   validateWorkingSetQualityCorpus();
-
-  const packResult = run("npm", ["pack", "--dry-run", "--json"]);
+  
+  const packResult = run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"]);
   const packReport = JSON.parse(packResult.stdout);
   const packInfo = Array.isArray(packReport) ? packReport[0] : Object.values(packReport)[0];
+  
   if (packInfo === undefined || !Array.isArray(packInfo.files)) {
     throw new Error("npm pack --json returned no package file report");
   }
@@ -63,7 +64,9 @@ function main() {
     "docs/USAGE.md",
     "skills/wabachi/SKILL.md",
     ".codex-plugin/plugin.json",
+    "dist/architecture/documentation/site.js",
     "dist/architecture/documentation/react-flow.js",
+    "dist/architecture/projection/react-flow.js",
   ]) {
     if (!packedFiles.includes(requiredPath)) {
       throw new Error(`required bundled asset "${requiredPath}" is not included in the packed tarball`);

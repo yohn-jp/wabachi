@@ -3,10 +3,9 @@ import path from "node:path";
 import { parseCanonicalArchitectureDocument } from "./canon/codec.js";
 import { projectArchitectureDocument } from "./documentation/project.js";
 import { ArchitectureSiteError, buildArchitectureSite } from "./documentation/site.js";
-import { projectArchitectureDocumentToStructurizr } from "./projection/structurizr.js";
+import { projectArchitectureDocumentToReactFlow } from "./projection/react-flow.js";
 import { commandUsage } from "../command-contract.js";
 
-const DEFAULT_STRUCTURIZR_COMMAND = "structurizr";
 const MAX_DIAGNOSTIC_LENGTH = 240;
 
 type ArchitectureCommand = "validate" | "render";
@@ -15,7 +14,6 @@ interface ArchitectureArgs {
   readonly command: ArchitectureCommand;
   readonly file: string;
   readonly outputRoot?: string;
-  readonly structurizrCommand?: string;
   readonly json: boolean;
 }
 
@@ -53,7 +51,6 @@ function parseArguments(
 
   let file: string | undefined;
   let outputRoot: string | undefined;
-  let structurizrCommand: string | undefined;
 
   for (let index = 1; index < args.length; index += 1) {
     const argument = args[index];
@@ -70,33 +67,20 @@ function parseArguments(
       continue;
     }
 
-    if (argument === "--structurizr-command") {
-      const value = args[index + 1];
-      if (value === undefined || value.startsWith("--")) {
-        return { ok: false, json, message: "--structurizr-command requires an executable path" };
-      }
-      if (structurizrCommand !== undefined) {
-        return { ok: false, json, message: "--structurizr-command may be provided only once" };
-      }
-      structurizrCommand = value;
-      index += 1;
-      continue;
-    }
-
     if (argument.startsWith("--")) return { ok: false, json, message: `unknown option: ${argument}` };
     if (file !== undefined) return { ok: false, json, message: "architecture commands accept one explicit file" };
     file = argument;
   }
 
   if (file === undefined) return { ok: false, json, message: usage(command) };
-  if (command === "validate" && (outputRoot !== undefined || structurizrCommand !== undefined)) {
+  if (command === "validate" && outputRoot !== undefined) {
     return { ok: false, json, message: "validate does not accept render options" };
   }
   if (command === "render" && outputRoot === undefined) {
     return { ok: false, json, message: "render requires --out <dir>" };
   }
 
-  return { ok: true, value: { command, file, outputRoot, structurizrCommand, json } };
+  return { ok: true, value: { command, file, outputRoot, json } };
 }
 
 function writeFailure(command: ArchitectureCommand, json: boolean, diagnostic: ArchitectureDiagnostic): number {
@@ -147,20 +131,12 @@ export async function runArchitectureCli(args: readonly string[]): Promise<numbe
 
   try {
     const documentation = projectArchitectureDocument(document);
-    const structurizr = projectArchitectureDocumentToStructurizr(document);
+    const reactFlow = await projectArchitectureDocumentToReactFlow(document);
     const result = await buildArchitectureSite({
       outputRoot: path.resolve(parsed.value.outputRoot as string),
       documentation,
-      structurizr,
-      launcher: { executable: parsed.value.structurizrCommand ?? DEFAULT_STRUCTURIZR_COMMAND },
+      reactFlow,
     });
-
-    if (!result.complete) {
-      return writeFailure(command, json, {
-        code: "export-failed",
-        message: result.export.diagnostic?.message ?? "Structurizr static export failed",
-      });
-    }
 
     if (json) {
       console.log(

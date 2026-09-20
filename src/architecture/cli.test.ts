@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
@@ -79,64 +79,27 @@ test("invalid Canon returns a bounded non-zero JSON diagnostic", async () => {
   }
 });
 
-test("render uses the override as one executable identity and fixed export arguments", async () => {
+test("render uses the bundled React Flow + ELK renderer without an external executable", async () => {
   const directory = await temporaryDirectory();
   const file = await canonicalFile(directory);
   const outputRoot = path.join(directory, "site");
-  const invocationLog = path.join(directory, "invocations.jsonl");
-  const executable = path.join(directory, "structurizr test");
-  await writeFile(
-    executable,
-    `#!/usr/bin/env node
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import path from "node:path";
-const args = process.argv.slice(2);
-appendFileSync(${JSON.stringify(invocationLog)}, JSON.stringify(args) + "\\n");
-if (args[0] === "version") {
-  console.log("test-structurizr-1");
-} else {
-  const output = args[args.indexOf("-output") + 1];
-  mkdirSync(output, { recursive: true });
-  writeFileSync(path.join(output, "index.html"), "diagram");
-}
-`,
-    "utf8",
-  );
-  await chmod(executable, 0o755);
-
   const output = captureOutput();
   try {
-    assert.equal(
-      await runArchitectureCli(["render", file, "--out", outputRoot, "--structurizr-command", executable, "--json"]),
-      0,
-    );
+    assert.equal(await runArchitectureCli(["render", file, "--out", outputRoot, "--json"]), 0);
     const result = JSON.parse(output.logs[0] ?? "{}") as { ok?: boolean; outputRoot?: string };
     assert.equal(result.ok, true);
     assert.equal(result.outputRoot, outputRoot);
-    assert.equal(await readFile(path.join(outputRoot, "diagrams", "index.html"), "utf8"), "diagram");
-
-    const invocations = (await readFile(invocationLog, "utf8"))
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line) as string[]);
-    assert.deepEqual(invocations, [
-      ["version"],
-      [
-        "export",
-        "-format",
-        "static",
-        "-workspace",
-        path.join(outputRoot, "workspace.dsl"),
-        "-output",
-        path.join(outputRoot, "diagrams"),
-      ],
-    ]);
+    assert.match(await readFile(path.join(outputRoot, "diagrams", "index.html"), "utf8"), /React Flow/u);
+    assert.match(
+      await readFile(path.join(outputRoot, "diagrams", "wabachi-react-flow.css"), "utf8"),
+      /wabachi-react-flow/u,
+    );
   } finally {
     output.restore();
   }
 });
 
-test("render export failure and raw argument strings return non-zero", async () => {
+test("the removed Structurizr override is rejected as an unknown option", async () => {
   const directory = await temporaryDirectory();
   const file = await canonicalFile(directory);
   const output = captureOutput();
@@ -148,7 +111,7 @@ test("render export failure and raw argument strings return non-zero", async () 
         "--out",
         path.join(directory, "missing-command-site"),
         "--structurizr-command",
-        `${path.join(directory, "missing command")} --version`,
+        "structurizr",
         "--json",
       ]),
       1,
@@ -156,7 +119,7 @@ test("render export failure and raw argument strings return non-zero", async () 
     const result = JSON.parse(output.logs[0] ?? "{}") as {
       diagnostics?: Array<{ code?: string }>;
     };
-    assert.equal(result.diagnostics?.[0]?.code, "export-failed");
+    assert.equal(result.diagnostics?.[0]?.code, "invalid-arguments");
   } finally {
     output.restore();
   }
