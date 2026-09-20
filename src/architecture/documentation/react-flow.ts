@@ -1,7 +1,24 @@
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  BaseEdge,
+  Handle,
+  MarkerType,
+  Position,
+  ReactFlow,
+  ReactFlowProvider,
+  type Edge,
+  type EdgeProps,
+  type Node,
+  type NodeProps,
+} from "@xyflow/react";
 import type {
   ReactFlowEdge,
   ReactFlowEdgeSection,
   ReactFlowNode,
+  ReactFlowNodeData,
   ReactFlowProjection,
   ReactFlowViewProjection,
 } from "../projection/react-flow.js";
@@ -28,7 +45,18 @@ export class ReactFlowStaticRenderError extends Error {
   }
 }
 
-export const REACT_FLOW_DIAGRAM_CSS = `.wabachi-react-flow-diagrams {
+const require = createRequire(import.meta.url);
+
+function reactFlowStylesheet(): string {
+  try {
+    return readFileSync(require.resolve("@xyflow/react/dist/style.css"), "utf8");
+  } catch (error) {
+    const detail = error instanceof Error ? `: ${error.message}` : "";
+    throw new ReactFlowStaticRenderError(`React Flow stylesheet is unavailable${detail}`);
+  }
+}
+
+const WABACHI_REACT_FLOW_CSS = `.wabachi-react-flow-diagrams {
   --wabachi-flow-ink: #202124;
   --wabachi-flow-muted: #5f6368;
   --wabachi-flow-border: #aeb7c4;
@@ -62,70 +90,72 @@ export const REACT_FLOW_DIAGRAM_CSS = `.wabachi-react-flow-diagrams {
 .wabachi-react-flow-canvas {
   display: block;
   inline-size: 100%;
-  block-size: auto;
   min-block-size: 12rem;
-  overflow: visible;
+  overflow: hidden;
   background: var(--wabachi-flow-canvas);
   border: 1px solid var(--wabachi-flow-border);
   border-radius: 0.5rem;
 }
 
-.wabachi-react-flow-edge {
-  fill: none;
+.wabachi-react-flow-surface {
+  color: var(--wabachi-flow-ink);
+  background: var(--wabachi-flow-canvas);
+}
+
+.wabachi-react-flow-node {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  inline-size: 100%;
+  block-size: 100%;
+  padding: 0.75rem;
+  color: var(--wabachi-flow-ink);
+  background: var(--wabachi-flow-surface);
+  border: 2px solid var(--wabachi-flow-border);
+  border-radius: 0.5rem;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.wabachi-react-flow-node--parent {
+  border-style: dashed;
+}
+
+.wabachi-react-flow-node[data-kind="service"],
+.wabachi-react-flow-node[data-kind="system"] {
+  background: #eef6ff;
+}
+
+.wabachi-react-flow-node[data-kind="component"] {
+  background: #f4f0ff;
+}
+
+.wabachi-react-flow-node[data-kind="actor"] {
+  background: #fff7e6;
+}
+
+.wabachi-react-flow-node > .react-flow__handle {
+  opacity: 0;
+}
+
+.wabachi-react-flow-edge .react-flow__edge-path {
   stroke: var(--wabachi-flow-edge);
   stroke-width: 2;
 }
 
-.wabachi-react-flow-edge-label {
+.wabachi-react-flow-edge .react-flow__edge-text {
   fill: var(--wabachi-flow-ink);
   font-size: 12px;
-  paint-order: stroke;
-  stroke: var(--wabachi-flow-canvas);
-  stroke-width: 5px;
-  stroke-linejoin: round;
 }
 
-.wabachi-react-flow-node {
-  color: var(--wabachi-flow-ink);
-}
-
-.wabachi-react-flow-node > rect {
-  fill: var(--wabachi-flow-surface);
-  stroke: var(--wabachi-flow-border);
-  stroke-width: 2;
-}
-
-.wabachi-react-flow-node--parent > rect {
-  stroke-dasharray: 6 3;
-}
-
-.wabachi-react-flow-node[data-kind="service"] > rect,
-.wabachi-react-flow-node[data-kind="system"] > rect {
-  fill: #eef6ff;
-}
-
-.wabachi-react-flow-node[data-kind="component"] > rect {
-  fill: #f4f0ff;
-}
-
-.wabachi-react-flow-node[data-kind="actor"] > rect {
-  fill: #fff7e6;
-}
-
-.wabachi-react-flow-node > text {
-  dominant-baseline: middle;
-  fill: currentColor;
-  font-size: 14px;
-  font-weight: 600;
-  pointer-events: none;
-  text-anchor: middle;
-}
-
-.wabachi-react-flow-node > title,
-.wabachi-react-flow-edge > title {
-  pointer-events: none;
+.wabachi-react-flow-edge .react-flow__edge-textbg {
+  fill: var(--wabachi-flow-canvas);
+  opacity: 0.95;
 }
 `;
+
+export const REACT_FLOW_DIAGRAM_CSS = `${reactFlowStylesheet()}\n${WABACHI_REACT_FLOW_CSS}`;
 
 export const REACT_FLOW_STATIC_ASSETS: readonly ReactFlowStaticAsset[] = Object.freeze([
   Object.freeze({
@@ -173,10 +203,6 @@ function formatNumber(value: number): string {
   return String(Object.is(value, -0) ? 0 : value);
 }
 
-function attr(name: string, value: string): string {
-  return ` ${name}="${escapeHtml(value)}"`;
-}
-
 function nodePosition(node: ReactFlowNode, path: string): { readonly x: number; readonly y: number } {
   return Object.freeze({
     x: finiteNumber(node.position.x, `${path}.position.x`),
@@ -203,20 +229,22 @@ function sectionPoints(section: ReactFlowEdgeSection, path: string): readonly { 
   );
 }
 
-function edgePath(
-  edge: ReactFlowEdge,
-  viewKey: string,
-): { readonly path: string; readonly labelPoint: { x: number; y: number } } {
+function edgePath(edge: Pick<ReactFlowEdge, "id" | "data">): {
+  readonly path: string;
+  readonly labelPoint: { x: number; y: number };
+} {
   if (edge.data.sections.length === 0) {
-    throw new ReactFlowStaticRenderError(`view ${viewKey} edge ${edge.id} has no routed sections`);
+    throw new ReactFlowStaticRenderError(`view ${edge.data.viewKey} edge ${edge.id} has no routed sections`);
   }
 
   const paths: string[] = [];
   let labelPoint: { x: number; y: number } | undefined;
   edge.data.sections.forEach((section, sectionIndex) => {
-    const points = sectionPoints(section, `views[${viewKey}].edges[${edge.id}].sections[${sectionIndex}]`);
+    const points = sectionPoints(section, `views[${edge.data.viewKey}].edges[${edge.id}].sections[${sectionIndex}]`);
     if (points.length < 2) {
-      throw new ReactFlowStaticRenderError(`view ${viewKey} edge ${edge.id} has an incomplete routed section`);
+      throw new ReactFlowStaticRenderError(
+        `view ${edge.data.viewKey} edge ${edge.id} has an incomplete routed section`,
+      );
     }
     const [first, ...rest] = points;
     paths.push(
@@ -274,8 +302,9 @@ function validateProjection(projection: ReactFlowProjection): void {
       if (typeof node.id !== "string" || node.id.length === 0) {
         throw new ReactFlowStaticRenderError(`${path}.id must be a non-empty string`);
       }
-      if (nodeIds.has(node.id))
+      if (nodeIds.has(node.id)) {
         throw new ReactFlowStaticRenderError(`view ${view.key} contains duplicate node id: ${node.id}`);
+      }
       nodeIds.add(node.id);
       if (node.data.viewKey !== view.key) {
         throw new ReactFlowStaticRenderError(`${path}.data.viewKey does not match view key ${view.key}`);
@@ -303,7 +332,7 @@ function validateProjection(projection: ReactFlowProjection): void {
       if (edge.data.viewKey !== view.key) {
         throw new ReactFlowStaticRenderError(`${path}.data.viewKey does not match view key ${view.key}`);
       }
-      edgePath(edge, view.key);
+      edgePath(edge);
     }
   }
 }
@@ -328,115 +357,190 @@ function absoluteNodePosition(
   return result;
 }
 
-function renderEdge(edge: ReactFlowEdge, view: ReactFlowViewProjection, markerId: string): string {
-  const routed = edgePath(edge, view.key);
-  const relationshipId =
-    edge.data.canonRelationshipId === undefined
-      ? ""
-      : attr("data-canon-relationship-id", edge.data.canonRelationshipId);
-  return `<g id="${escapeHtml(`edge-${identityToken(edge.id)}`)}" class="wabachi-react-flow-edge-group" data-edge-id="${escapeHtml(edge.id)}" data-view-key="${escapeHtml(view.key)}" data-canon-source-id="${escapeHtml(edge.data.canonSourceId)}" data-canon-target-id="${escapeHtml(edge.data.canonTargetId)}"${relationshipId} data-section-count="${String(edge.data.sections.length)}">
-<title>${escapeHtml(`${edge.data.canonSourceId} → ${edge.data.canonTargetId}: ${edge.label}`)}</title>
-<path class="wabachi-react-flow-edge" d="${escapeHtml(routed.path)}" marker-end="url(#${escapeHtml(markerId)})"/>
-<text class="wabachi-react-flow-edge-label" x="${formatNumber(routed.labelPoint.x)}" y="${formatNumber(routed.labelPoint.y)}" text-anchor="middle">${escapeHtml(edge.label)}</text>
-</g>`;
-}
-
-function renderNode(
-  node: ReactFlowNode,
-  view: ReactFlowViewProjection,
-  childrenByParent: ReadonlyMap<string, readonly ReactFlowNode[]>,
-  depth: number,
-): string {
-  const children = childrenByParent.get(node.id) ?? [];
-  const size = nodeSize(node, `node ${node.id}`);
-  const position = nodePosition(node, `node ${node.id}`);
-  const parentId = node.parentId === undefined ? "" : attr("data-parent-id", node.parentId);
-  const className =
-    children.length === 0 ? "wabachi-react-flow-node" : "wabachi-react-flow-node wabachi-react-flow-node--parent";
-  const nested = children.map((child) => renderNode(child, view, childrenByParent, depth + 1)).join("\n");
-
-  return `<g id="${escapeHtml(`node-${identityToken(node.id)}`)}" class="${className}" data-node-id="${escapeHtml(node.id)}" data-canon-id="${escapeHtml(node.data.canonId)}" data-view-key="${escapeHtml(view.key)}" data-kind="${escapeHtml(node.data.kind)}"${parentId} aria-level="${String(depth)}" transform="translate(${formatNumber(position.x)} ${formatNumber(position.y)})" role="group">
-<title>${escapeHtml(`${node.data.label} (${node.data.canonId})`)}</title>
-<rect width="${formatNumber(size.width)}" height="${formatNumber(size.height)}" rx="8"/>
-<text x="${formatNumber(size.width / 2)}" y="${formatNumber(size.height / 2)}">${escapeHtml(node.data.label)}</text>
-${nested}
-</g>`;
+interface ViewportBounds {
+  readonly width: number;
+  readonly height: number;
+  readonly defaultViewport: { readonly x: number; readonly y: number; readonly zoom: 1 };
 }
 
 function viewBounds(
   view: ReactFlowViewProjection,
   absolutePositions: ReadonlyMap<string, { x: number; y: number }>,
-): string {
+): ViewportBounds {
   const bounds: Bounds = { minX: 0, minY: 0, maxX: 320, maxY: 160 };
   for (const node of view.nodes) {
     const position = absolutePositions.get(node.id) as { x: number; y: number };
     addNodeBounds(bounds, node, position, `node ${node.id}`);
   }
   for (const edge of view.edges) {
-    for (const [sectionIndex, section] of edge.data.sections.entries()) {
+    edge.data.sections.forEach((section, sectionIndex) => {
       for (const point of sectionPoints(section, `edge ${edge.id}.sections[${sectionIndex}]`)) {
         includePoint(bounds, point.x, point.y);
       }
-    }
+    });
   }
   const padding = 32;
-  return [
-    bounds.minX - padding,
-    bounds.minY - padding,
-    Math.max(320, bounds.maxX - bounds.minX + padding * 2),
-    Math.max(160, bounds.maxY - bounds.minY + padding * 2),
-  ]
-    .map(formatNumber)
-    .join(" ");
+  return Object.freeze({
+    width: Math.max(320, bounds.maxX - bounds.minX + padding * 2),
+    height: Math.max(160, bounds.maxY - bounds.minY + padding * 2),
+    defaultViewport: Object.freeze({ x: padding - bounds.minX, y: padding - bounds.minY, zoom: 1 as const }),
+  });
+}
+
+type ArchitectureFlowNodeData = ReactFlowNodeData & { readonly isParent: boolean } & Record<string, unknown>;
+
+type ArchitectureFlowNode = Node<ArchitectureFlowNodeData, "architecture">;
+type ArchitectureFlowEdgeData = ReactFlowEdge["data"] & Record<string, unknown>;
+type ArchitectureFlowEdge = Edge<ArchitectureFlowEdgeData, "routed">;
+
+function ArchitectureNode({ data, parentId }: NodeProps<ArchitectureFlowNode>): React.ReactElement {
+  const className = data.isParent
+    ? "wabachi-react-flow-node wabachi-react-flow-node--parent"
+    : "wabachi-react-flow-node";
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement(Handle, { type: "target", position: Position.Left, "aria-hidden": true }),
+    React.createElement(
+      "div",
+      {
+        className,
+        "data-canon-id": data.canonId,
+        "data-view-key": data.viewKey,
+        "data-kind": data.kind,
+        ...(parentId === undefined ? {} : { "data-parent-id": parentId }),
+        role: "group",
+      },
+      data.label,
+    ),
+    React.createElement(Handle, { type: "source", position: Position.Right, "aria-hidden": true }),
+  );
+}
+
+function RoutedEdge({ id, data, label, markerEnd }: EdgeProps<ArchitectureFlowEdge>): React.ReactElement {
+  if (data === undefined) {
+    throw new ReactFlowStaticRenderError(`React Flow edge ${id} has no projection data`);
+  }
+  const routed = edgePath({ id, data });
+  return React.createElement(
+    "g",
+    {
+      "data-view-key": data.viewKey,
+      "data-canon-source-id": data.canonSourceId,
+      "data-canon-target-id": data.canonTargetId,
+      ...(data.canonRelationshipId === undefined ? {} : { "data-canon-relationship-id": data.canonRelationshipId }),
+      "data-section-count": String(data.sections.length),
+    },
+    React.createElement(BaseEdge, {
+      id,
+      path: routed.path,
+      label,
+      labelX: routed.labelPoint.x,
+      labelY: routed.labelPoint.y,
+      markerEnd,
+      className: "wabachi-react-flow-edge",
+    }),
+  );
+}
+
+const NODE_TYPES = Object.freeze({ architecture: ArchitectureNode });
+const EDGE_TYPES = Object.freeze({ routed: RoutedEdge });
+
+function flowNodes(view: ReactFlowViewProjection): readonly ArchitectureFlowNode[] {
+  const nodes = [...view.nodes].sort((left, right) => compareStrings(left.id, right.id));
+  const parentIds = new Set(nodes.flatMap((node) => (node.parentId === undefined ? [] : [node.parentId])));
+  return Object.freeze(
+    nodes
+      .map((node) => ({
+        id: node.id,
+        type: "architecture" as const,
+        data: { ...node.data, isParent: parentIds.has(node.id) },
+        position: { ...node.position },
+        width: node.width,
+        height: node.height,
+        handles: [
+          { type: "target" as const, position: Position.Left, x: 0, y: node.height / 2 },
+          { type: "source" as const, position: Position.Right, x: node.width, y: node.height / 2 },
+        ],
+        ...(node.parentId === undefined ? {} : { parentId: node.parentId, extent: "parent" as const }),
+      }))
+      .map((node) => ({
+        ...node,
+        data: node.data as ArchitectureFlowNodeData,
+      })),
+  );
+}
+
+function flowEdges(view: ReactFlowViewProjection): readonly ArchitectureFlowEdge[] {
+  const edges = [...view.edges].sort((left, right) => compareStrings(left.id, right.id));
+  return Object.freeze(
+    edges
+      .map((edge) => ({
+        id: edge.id,
+        type: "routed" as const,
+        source: edge.source,
+        target: edge.target,
+        label: edge.label,
+        markerEnd: { type: MarkerType.ArrowClosed },
+        data: edge.data as ArchitectureFlowEdgeData,
+      }))
+      .map((edge) => edge as ArchitectureFlowEdge),
+  );
 }
 
 function renderView(projection: ReactFlowProjection, view: ReactFlowViewProjection): string {
-  const nodes = [...view.nodes].sort((left, right) => compareStrings(left.id, right.id));
-  const edges = [...view.edges].sort((left, right) => compareStrings(left.id, right.id));
-  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const nodes = [...flowNodes(view)];
+  const edges = [...flowEdges(view)];
+  const nodesById = new Map(view.nodes.map((node) => [node.id, node]));
   const absolutePositions = new Map<string, { x: number; y: number }>();
-  for (const node of nodes) absoluteNodePosition(node, nodesById, absolutePositions, new Set<string>());
-
-  const childrenByParent = new Map<string, ReactFlowNode[]>();
-  for (const node of nodes) {
-    if (node.parentId === undefined) continue;
-    const children = childrenByParent.get(node.parentId) ?? [];
-    children.push(node);
-    childrenByParent.set(node.parentId, children);
-  }
-  for (const children of childrenByParent.values()) children.sort((left, right) => compareStrings(left.id, right.id));
-
-  const roots = nodes.filter((node) => node.parentId === undefined);
+  for (const node of view.nodes) absoluteNodePosition(node, nodesById, absolutePositions, new Set<string>());
+  const bounds = viewBounds(view, absolutePositions);
   const viewToken = identityToken(view.key);
   const titleId = `react-flow-title-${viewToken}`;
-  const markerId = `react-flow-arrow-${viewToken}`;
   const title = view.title ?? view.key;
   const description = view.description === undefined ? "" : `<p>${escapeHtml(view.description)}</p>`;
   const losses =
     view.losses.length === 0
       ? ""
       : `<p class="wabachi-react-flow-losses" data-loss-count="${String(view.losses.length)}">Projection losses: ${String(view.losses.length)}</p>`;
-  const edgeMarkup = edges.map((edge) => renderEdge(edge, view, markerId)).join("\n");
-  const nodeMarkup = roots.map((node) => renderNode(node, view, childrenByParent, 1)).join("\n");
+  const flowMarkup = renderToStaticMarkup(
+    React.createElement(ReactFlowProvider, {
+      initialNodes: nodes,
+      initialEdges: edges,
+      children: React.createElement(ReactFlow, {
+        id: `react-flow-${viewToken}`,
+        nodes,
+        edges,
+        nodeTypes: NODE_TYPES,
+        edgeTypes: EDGE_TYPES,
+        defaultViewport: bounds.defaultViewport,
+        nodesDraggable: false,
+        nodesConnectable: false,
+        elementsSelectable: false,
+        panOnDrag: false,
+        zoomOnScroll: false,
+        zoomOnPinch: false,
+        zoomOnDoubleClick: false,
+        proOptions: { hideAttribution: true },
+        className: "wabachi-react-flow-surface",
+        style: { width: "100%", height: `${formatNumber(bounds.height)}px` },
+        "aria-label": `${title} architecture diagram`,
+      }),
+    }),
+  );
 
-  return `<section id="react-flow-view-${viewToken}" class="wabachi-react-flow-diagram" data-view-key="${escapeHtml(view.key)}" data-canon-document-id="${escapeHtml(projection.documentId)}" data-canon-version="${escapeHtml(String(projection.canonVersion))}" data-projection-loss-count="${String(view.losses.length)}">
+  return `<section id="react-flow-view-${escapeHtml(viewToken)}" class="wabachi-react-flow-diagram" data-view-key="${escapeHtml(view.key)}" data-canon-document-id="${escapeHtml(projection.documentId)}" data-canon-version="${escapeHtml(String(projection.canonVersion))}" data-projection-loss-count="${String(view.losses.length)}">
 <header>
 <h2 id="${escapeHtml(titleId)}">${escapeHtml(title)}</h2>
 ${description}${losses}
 </header>
-<svg class="wabachi-react-flow-canvas" role="img" aria-labelledby="${escapeHtml(titleId)}" viewBox="${viewBounds(view, absolutePositions)}" xmlns="http://www.w3.org/2000/svg">
-<defs>
-<marker id="${escapeHtml(markerId)}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="strokeWidth">
-<path d="M 0 0 L 10 5 L 0 10 z"/>
-</marker>
-</defs>
-<g class="wabachi-react-flow-edges" data-view-key="${escapeHtml(view.key)}">${edgeMarkup}</g>
-<g class="wabachi-react-flow-nodes" data-view-key="${escapeHtml(view.key)}">${nodeMarkup}</g>
-</svg>
+<div class="wabachi-react-flow-canvas" data-view-key="${escapeHtml(view.key)}" data-canon-document-id="${escapeHtml(projection.documentId)}" data-canon-version="${escapeHtml(String(projection.canonVersion))}" style="height: ${formatNumber(bounds.height)}px" role="img" aria-labelledby="${escapeHtml(titleId)}">
+${flowMarkup}
+</div>
 </section>`;
 }
 
-/** Render the React Flow projection as deterministic HTML and local assets. */
+/** Render the React Flow projection with @xyflow/react's ReactFlow component and local assets. */
 export function renderReactFlowStatic(projection: ReactFlowProjection): ReactFlowStaticRenderResult {
   validateProjection(projection);
   const views = [...projection.views].sort((left, right) => compareStrings(left.key, right.key));

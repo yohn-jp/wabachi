@@ -94,10 +94,15 @@ test("renders hierarchy, labels, routed direction, and Canon/view identities", (
   assert.match(result.markup, /data-canon-target-id="payments"/);
   assert.match(result.markup, /data-canon-relationship-id="relationship-orders-payments"/);
   assert.match(result.markup, /data-section-count="1"/);
-  assert.match(result.markup, /marker-end="url\(#react-flow-arrow-structure\)"/);
+  assert.match(result.markup, /data-testid="rf__wrapper"/);
+  assert.match(result.markup, /class="react-flow__edges"/);
+  assert.match(result.markup, /class="react-flow__nodes"/);
+  assert.match(result.markup, /class="react-flow__edge react-flow__edge-routed/);
+  assert.match(result.markup, /marker-end="url\(&#x27;#react-flow-structure__type=arrowclosed&#x27;\)"/);
   assert.match(result.markup, /M 220 80 L 270 80 L 270 120 L 320 120/);
-  assert.match(result.markup, />calls<\/text>/);
-  assert.match(result.markup, /<title>orders \(orders\)<\/title>/);
+  assert.match(result.markup, /class="react-flow__edge-text"[^>]*>calls<\/text>/);
+  assert.match(result.markup, /class="wabachi-react-flow-node wabachi-react-flow-node--parent"[^>]*>orders<\/div>/);
+  assert.doesNotMatch(result.markup, /<svg class="wabachi-react-flow-canvas"/u);
 });
 
 test("renders equivalent projection data deterministically and keeps assets offline", () => {
