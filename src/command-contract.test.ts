@@ -21,6 +21,7 @@ test("the command contract covers the supported Wabachi surface", () => {
       "run.execute",
       "matrix.execute",
       "architecture.help",
+      "architecture.example",
       "architecture.validate",
       "architecture.render",
       "skill.index",
@@ -52,7 +53,7 @@ test("progressive help resolves root, domain, and leaf projections", () => {
   assert.equal(domain?.kind, "domain");
   assert.deepEqual(
     domain?.commands.map((entry) => entry.id),
-    ["architecture.validate", "architecture.render"],
+    ["architecture.example", "architecture.validate", "architecture.render"],
   );
 
   const leaf = projectCommandHelp(["architecture", "render", "canon.json"]);

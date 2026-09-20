@@ -8,11 +8,11 @@ import { commandUsage } from "../command-contract.js";
 
 const MAX_DIAGNOSTIC_LENGTH = 240;
 
-type ArchitectureCommand = "validate" | "render";
+type ArchitectureCommand = "example" | "validate" | "render";
 
 interface ArchitectureArgs {
   readonly command: ArchitectureCommand;
-  readonly file: string;
+  readonly file?: string;
   readonly outputRoot?: string;
   readonly json: boolean;
 }
@@ -45,7 +45,7 @@ function parseArguments(
   | { readonly ok: false; readonly json: boolean; readonly message: string } {
   const command = args[0];
   const json = args.includes("--json");
-  if (command !== "validate" && command !== "render") {
+  if (command !== "example" && command !== "validate" && command !== "render") {
     return { ok: false, json, message: usage() };
   }
 
@@ -72,7 +72,10 @@ function parseArguments(
     file = argument;
   }
 
-  if (file === undefined) return { ok: false, json, message: usage(command) };
+  if (command === "example" && file !== undefined) {
+    return { ok: false, json, message: "architecture example does not accept a file" };
+  }
+  if (command !== "example" && file === undefined) return { ok: false, json, message: usage(command) };
   if (command === "validate" && outputRoot !== undefined) {
     return { ok: false, json, message: "validate does not accept render options" };
   }
@@ -113,9 +116,20 @@ export async function runArchitectureCli(args: readonly string[]): Promise<numbe
   if (!parsed.ok) return writeUsageFailure(parsed.json, parsed.message);
 
   const { command, file, json } = parsed.value;
+  if (command === "example") {
+    try {
+      const source = await readFile(new URL("../../docs/examples/minimal-canon.json", import.meta.url), "utf8");
+      parseCanonicalArchitectureDocument(source);
+      console.log(source.trim());
+      return 0;
+    } catch (error) {
+      return writeFailure(command, json, { code: "example-unavailable", message: errorMessage(error) });
+    }
+  }
+
   let document;
   try {
-    document = parseCanonicalArchitectureDocument(await readFile(file, "utf8"));
+    document = parseCanonicalArchitectureDocument(await readFile(file as string, "utf8"));
   } catch (error) {
     return writeFailure(command, json, { code: "invalid-canon", message: errorMessage(error) });
   }

@@ -38,7 +38,7 @@ test("progressive help projects command and leaf options", async () => {
     assert.equal(projection.kind, "domain");
     assert.deepEqual(
       projection.commands.map((entry: { id: string }) => entry.id),
-      ["architecture.validate", "architecture.render"],
+      ["architecture.example", "architecture.validate", "architecture.render"],
     );
   } finally {
     console.log = originalLog;

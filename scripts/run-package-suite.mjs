@@ -62,6 +62,7 @@ function main() {
 
   for (const requiredPath of [
     "docs/USAGE.md",
+    "docs/examples/minimal-canon.json",
     "skills/wabachi/SKILL.md",
     ".codex-plugin/plugin.json",
     "dist/architecture/documentation/site.js",

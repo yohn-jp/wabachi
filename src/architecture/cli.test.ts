@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { createArchitectureDocument } from "./canon/document.js";
-import { serializeCanonicalArchitectureDocument } from "./canon/codec.js";
+import { parseCanonicalArchitectureDocument, serializeCanonicalArchitectureDocument } from "./canon/codec.js";
 import { runArchitectureCli } from "./cli.js";
 
 const temporaryDirectories: string[] = [];
@@ -57,6 +57,19 @@ test("validate accepts only an explicit Canon file and emits JSON diagnostics", 
     assert.equal(await runArchitectureCli(["validate", "--json"]), 1);
     const failure = JSON.parse(output.logs[1] ?? "{}") as { diagnostics?: Array<{ code?: string }> };
     assert.equal(failure.diagnostics?.[0]?.code, "invalid-arguments");
+  } finally {
+    output.restore();
+  }
+});
+
+test("example prints a minimal Canon validated by the real codec without writing a file", async () => {
+  const output = captureOutput();
+  try {
+    assert.equal(await runArchitectureCli(["example"]), 0);
+    const document = parseCanonicalArchitectureDocument(output.logs[0] ?? "");
+    assert.equal(document.documentId, "minimal-architecture-canon");
+    assert.equal(document.root.id, "architecture");
+    assert.deepEqual(document.elements, []);
   } finally {
     output.restore();
   }
