@@ -9,7 +9,10 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/USAGE.md",
+    "skills",
+    ".codex-plugin"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/chmod-bin.mjs",

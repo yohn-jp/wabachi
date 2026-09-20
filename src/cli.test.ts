@@ -22,6 +22,49 @@ test("--help exits 0 and prints usage", async () => {
   }
 });
 
+test("progressive help projects command and leaf options", async () => {
+  const originalLog = console.log;
+  const lines: string[] = [];
+  console.log = (line: string) => lines.push(line);
+  try {
+    assert.equal(await runCli(["architecture", "render", "--help"]), 0);
+    assert.match(lines[0] ?? "", /architecture render <file>/u);
+    assert.match(lines[0] ?? "", /--structurizr-command/u);
+
+    lines.length = 0;
+    assert.equal(await runCli(["architecture", "--help=json"]), 0);
+    const projection = JSON.parse(lines[0] ?? "{}");
+    assert.equal(projection.kind, "domain");
+    assert.deepEqual(
+      projection.commands.map((entry: { id: string }) => entry.id),
+      ["architecture.validate", "architecture.render"],
+    );
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test("skill index, scenario, and unknown scenario are bounded and deterministic", async () => {
+  const originalLog = console.log;
+  const originalError = console.error;
+  const logs: string[] = [];
+  const errors: string[] = [];
+  console.log = (line: string) => logs.push(line);
+  console.error = (line: string) => errors.push(line);
+  try {
+    assert.equal(await runCli(["skill", "--json"]), 0);
+    assert.equal(JSON.parse(logs[0] ?? "{}").scenarios.length, 5);
+    logs.length = 0;
+    assert.equal(await runCli(["skill", "architecture-documentation", "--json"]), 0);
+    assert.equal(JSON.parse(logs[0] ?? "{}").id, "architecture-documentation");
+    assert.equal(await runCli(["skill", "not-a-scenario"]), 1);
+    assert.match(errors[0] ?? "", /unknown skill scenario/u);
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+});
+
 test("--version reports package version", async () => {
   const originalLog = console.log;
   const lines: string[] = [];

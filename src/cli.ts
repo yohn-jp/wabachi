@@ -8,9 +8,31 @@ import { createScipTypescriptProvider } from "./runtime/scipProvider.js";
 import { createTypeScriptProvider } from "./runtime/typescriptProvider.js";
 import { runProviderMatrix } from "./runtime/workflow.js";
 import { runArchitectureCli } from "./architecture/cli.js";
+import { commandUsage, parseHelpRequest, projectCommandHelp, renderCommandHelp } from "./command-contract.js";
+import {
+  boundText,
+  findSkillScenario,
+  projectSkillIndexToJson,
+  projectSkillIndexToText,
+  projectSkillScenarioToJson,
+  projectSkillScenarioToText,
+  serializeSkillJson,
+} from "./skill.js";
 
 export async function runCli(argv: string[]): Promise<number> {
   const command = argv[0];
+  const helpRequest = parseHelpRequest(argv);
+
+  if (helpRequest !== undefined) {
+    const projection = projectCommandHelp(helpRequest.positionals, helpRequest.mode);
+    if (projection === undefined) {
+      console.error(boundText(`unknown command: ${helpRequest.positionals[0] ?? ""}`));
+      return 1;
+    }
+    if (helpRequest.mode === "json") console.log(JSON.stringify(projection));
+    else console.log(renderCommandHelp(projection));
+    return 0;
+  }
 
   if (command === undefined || command === "--help" || command === "-h") {
     printHelp();
@@ -32,6 +54,10 @@ export async function runCli(argv: string[]): Promise<number> {
 
   if (command === "architecture") {
     return runArchitectureCli(argv.slice(1));
+  }
+
+  if (command === "skill") {
+    return runSkillCommand(argv.slice(1));
   }
 
   console.error(`unknown command: ${command}`);
@@ -68,7 +94,7 @@ async function runMatrixCommand(args: string[]): Promise<number> {
       configuredProviderIds = config.providers;
       configuredAdditionOrder = config.additionOrder;
     }
-    if (source === undefined) throw new Error("usage: wabachi matrix <repository> --revision <sha> --out <dir>");
+    if (source === undefined) throw new Error(commandUsage("matrix.execute"));
     if (revision === undefined) throw new Error("matrix requires --revision <40-character commit SHA>");
     const runRoot = outIndex === -1 ? undefined : args[outIndex + 1];
     if (runRoot === undefined) throw new Error("matrix requires --out <dir> so artifacts are retained");
@@ -111,7 +137,7 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
 async function runRunCommand(args: string[]): Promise<number> {
   const source = args[0];
   if (source === undefined) {
-    console.error("usage: wabachi run <repository> [--revision <ref>] [--out <dir>]");
+    console.error(commandUsage("run.execute"));
     return 1;
   }
 
@@ -142,19 +168,38 @@ async function runRunCommand(args: string[]): Promise<number> {
 }
 
 function printHelp(): void {
-  console.log(
-    [
-      "Usage: wabachi <command> [options]",
-      "",
-      "Commands:",
-      "  run <repository>   Resolve a repository/revision and execute registered providers",
-      "  matrix <repository>  Run providers and generate auditable facts, correlation, matrix, and report",
-      "  architecture validate <file>  Validate an explicit Architecture Canon file",
-      "  architecture render <file> --out <dir>  Render an explicit Architecture Canon site",
-      "  --help              Show this help",
-      "  --version           Print the installed version",
-    ].join("\n"),
-  );
+  const projection = projectCommandHelp([], "summary");
+  if (projection !== undefined) console.log(renderCommandHelp(projection));
+}
+
+function runSkillCommand(args: readonly string[]): number {
+  const json = args.includes("--json");
+  const scenarioId = args.find((argument) => !argument.startsWith("-"));
+  if (scenarioId === undefined) {
+    if (json) console.log(serializeSkillJson(projectSkillIndexToJson()));
+    else console.log(projectSkillIndexToText());
+    return 0;
+  }
+
+  const scenario = findSkillScenario(scenarioId);
+  if (scenario === undefined) {
+    const message = boundText(`unknown skill scenario: ${scenarioId}`);
+    if (json) {
+      console.log(
+        serializeSkillJson({ ok: false, command: "skill", diagnostics: [{ code: "unknown-scenario", message }] }),
+      );
+    } else {
+      console.error(message);
+    }
+    return 1;
+  }
+
+  if (json) {
+    console.log(serializeSkillJson(projectSkillScenarioToJson(scenario)));
+  } else {
+    console.log(projectSkillScenarioToText(scenario));
+  }
+  return 0;
 }
 
 function getVersion(): string {

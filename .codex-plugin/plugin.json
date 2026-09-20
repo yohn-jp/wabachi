@@ -1,0 +1,6 @@
+{
+  "name": "wabachi",
+  "version": "0.2.0",
+  "description": "Repository analysis and Architecture Canon workflows through the Wabachi CLI.",
+  "skills": "skills/wabachi"
+}

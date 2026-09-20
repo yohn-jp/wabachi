@@ -4,6 +4,7 @@ import { parseCanonicalArchitectureDocument } from "./canon/codec.js";
 import { projectArchitectureDocument } from "./documentation/project.js";
 import { ArchitectureSiteError, buildArchitectureSite } from "./documentation/site.js";
 import { projectArchitectureDocumentToStructurizr } from "./projection/structurizr.js";
+import { commandUsage } from "../command-contract.js";
 
 const DEFAULT_STRUCTURIZR_COMMAND = "structurizr";
 const MAX_DIAGNOSTIC_LENGTH = 240;
@@ -24,11 +25,9 @@ interface ArchitectureDiagnostic {
 }
 
 function usage(command?: ArchitectureCommand): string {
-  if (command === "validate") return "usage: PACKAGE_NAME architecture validate <file> [--json]";
-  if (command === "render") {
-    return "usage: PACKAGE_NAME architecture render <file> --out <dir> [--structurizr-command <executable-path>] [--json]";
-  }
-  return "usage: PACKAGE_NAME architecture <validate|render> ...";
+  if (command === "validate") return commandUsage("architecture.validate");
+  if (command === "render") return commandUsage("architecture.render");
+  return commandUsage("architecture.help");
 }
 
 function bounded(value: string): string {
