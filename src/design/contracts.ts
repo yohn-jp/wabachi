@@ -71,23 +71,29 @@ export interface EvidenceReference {
 export interface DesignReviewEvidence {
   readonly reviewId: string;
   readonly changeId: string;
-  readonly changeDigest: Digest;
+  readonly proposalDigest: Digest;
+  readonly proposalRevision: string;
   readonly decision: DesignReviewDecision;
-  readonly recordedAt: string;
-  readonly references?: readonly EvidenceReference[];
-  readonly rationale?: string;
+  readonly actor: string;
+  readonly reason: string;
+  readonly timestamp: string;
+  readonly evidence: readonly EvidenceReference[];
 }
 
-export interface ImplementationIdentity {
-  readonly repository: string;
-  readonly implementation: string;
+export interface ExternalIssueReference {
+  readonly repositoryHost: string;
+  readonly repositoryId: string;
+  readonly repository?: string;
+  readonly number: number;
 }
+
+export type ImplementationIdentity = ExternalIssueReference;
 
 export interface ImplementationLink {
   readonly linkId: string;
   readonly changeId: string;
   readonly changeDigest: Digest;
-  readonly implementation: ImplementationIdentity;
+  readonly implementation: ExternalIssueReference;
   readonly targetEntryKeys: readonly SemanticEntryKey[];
   readonly evidence?: readonly EvidenceReference[];
 }

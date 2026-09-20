@@ -1,32 +1,25 @@
-import type { RepositoryPathMapping, RepositorySymbolMapping, RepositoryTestMapping } from "./repository-mappings.js";
-
-export type CodeIntentKind = "purpose" | "responsibility" | "invariant" | "prohibition";
-
-export interface CodeIntentPathTarget {
-  readonly kind: "path";
-  readonly mapping: RepositoryPathMapping;
+export interface CodeIntentStatement {
+  readonly id: string;
+  readonly text: string;
 }
 
-export interface CodeIntentSymbolTarget {
-  readonly kind: "symbol";
-  readonly mapping: RepositorySymbolMapping;
+/** A provider-neutral obligation associated with one invariant or prohibition statement. */
+export interface CodeIntentVerificationObligation {
+  readonly id: string;
+  readonly statementId: string;
+  readonly mode: string;
+  readonly predicate: string;
 }
 
-export interface CodeIntentTestTarget {
-  readonly kind: "test";
-  readonly mapping: RepositoryTestMapping;
-}
-
-export type CodeIntentTarget = CodeIntentPathTarget | CodeIntentSymbolTarget | CodeIntentTestTarget;
-
-/** Canon-owned source-level intent attached to an existing repository mapping. */
+/** Canon-owned source-level intent that reuses existing Canon identities and mappings. */
 export interface CodeIntent {
   readonly id: string;
-  readonly kind: CodeIntentKind;
-  readonly canonId: string;
-  readonly target: CodeIntentTarget;
-  readonly statement: string;
-  readonly rationale?: string;
+  readonly ownerId: string;
+  readonly responsibilityIds: readonly string[];
+  readonly decisionIds: readonly string[];
+  readonly invariants: readonly CodeIntentStatement[];
+  readonly prohibitions: readonly CodeIntentStatement[];
+  readonly verificationObligations: readonly CodeIntentVerificationObligation[];
 }
 
 export interface CodeIntentContract {
