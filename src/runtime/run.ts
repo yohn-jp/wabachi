@@ -4,7 +4,12 @@ import path from "node:path";
 import type { ManifestProviderEntry, RunManifest } from "./manifest.js";
 import { collectToolchainVersions, writeManifest } from "./manifest.js";
 import type { Provider, ProviderContext, ProviderExecutionResult } from "./provider.js";
-import { createIsolatedWorkspace, resolveRepository } from "./repository.js";
+import {
+  createIsolatedWorkspace,
+  formatExternalProcessError,
+  isExternalProcessError,
+  resolveRepository,
+} from "./repository.js";
 
 export interface RunOptions {
   readonly source: string;
@@ -102,5 +107,6 @@ async function executeProvider(provider: Provider, context: ProviderContext): Pr
 }
 
 function toErrorMessage(error: unknown): string {
+  if (isExternalProcessError(error)) return formatExternalProcessError(error, "provider process");
   return error instanceof Error ? error.message : String(error);
 }

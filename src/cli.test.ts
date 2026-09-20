@@ -135,6 +135,25 @@ test("run resolves the given repository and writes a manifest", async () => {
   }
 });
 
+test("run and matrix CLI failures preserve bounded process diagnostics", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "wabachi-cli-process-failure-"));
+  const runRoot = await mkdtemp(path.join(os.tmpdir(), "wabachi-cli-matrix-failure-"));
+  const originalError = console.error;
+  const errors: string[] = [];
+  console.error = (line: string) => errors.push(line);
+  try {
+    assert.equal(await runCli(["run", directory]), 1);
+    assert.match(errors.at(-1) ?? "", /git failed: git rev-parse HEAD \(exit 128\) stderr: fatal:/u);
+
+    assert.equal(await runCli(["matrix", directory, "--revision", "0".repeat(40), "--out", runRoot]), 1);
+    assert.match(errors.at(-1) ?? "", /git failed: git rev-parse 0{40} \(exit 128\) stderr: fatal:/u);
+  } finally {
+    console.error = originalError;
+    await rm(directory, { recursive: true, force: true });
+    await rm(runRoot, { recursive: true, force: true });
+  }
+});
+
 test("root CLI routes architecture validation", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "wabachi-cli-architecture-"));
   const file = path.join(directory, "architecture.json");

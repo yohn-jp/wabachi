@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm, writeFile, mkdir } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -72,4 +72,49 @@ test("createIsolatedWorkspace materializes a repository containing binary conten
 
   const extractedBinary = await readFile(path.join(workspaceRoot, "asset.bin"));
   assert.ok(extractedBinary.equals(binaryContent));
+});
+
+test("createIsolatedWorkspace reports bounded git archive stderr and exit status", async () => {
+  const { repoDir } = await createFixtureRepoWithBinaryAsset();
+  const workspaceRoot = await newTmpDir("wabachi-git-archive-failure-");
+
+  await assert.rejects(
+    createIsolatedWorkspace(
+      { resolved: { source: repoDir, commitSha: "missing-commit" }, archiveDir: repoDir },
+      workspaceRoot,
+    ),
+    (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      assert.match(message, /git archive failed: git archive missing-commit \(exit 128\)/u);
+      assert.match(message, /stderr: fatal:/u);
+      assert.ok(message.length < 1400);
+      return true;
+    },
+  );
+});
+
+test("createIsolatedWorkspace reports tar stderr and exit status", async () => {
+  const { repoDir, commitSha } = await createFixtureRepoWithBinaryAsset();
+  const fakeBinDir = await newTmpDir("wabachi-fake-tar-");
+  const fakeTar = path.join(fakeBinDir, "tar");
+  await writeFile(fakeTar, "#!/bin/sh\nprintf 'forced tar failure\\n' >&2\nexit 23\n", "utf8");
+  await chmod(fakeTar, 0o755);
+
+  const workspaceRoot = await newTmpDir("wabachi-tar-failure-");
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${fakeBinDir}${path.delimiter}${previousPath ?? ""}`;
+  try {
+    await assert.rejects(
+      createIsolatedWorkspace({ resolved: { source: repoDir, commitSha }, archiveDir: repoDir }, workspaceRoot),
+      (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        assert.match(message, /tar extraction failed: tar -x -C .+ \(exit 23\)/u);
+        assert.match(message, /stderr: forced tar failure/u);
+        return true;
+      },
+    );
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
 });
