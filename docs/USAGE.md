@@ -61,23 +61,26 @@ installed Wabachi version.
 ## Architecture Canon
 
 Architecture Canon authoring is an explicit file-editing step. Wabachi does
-not provide an init or edit command. Create or revise the Canon document using
-the repository's documented schema, then validate it before rendering. To
-discover the current Canon shape and obtain a minimal valid starting document,
-run the read-only example command:
+not provide an init or edit command. Create or revise the conventional
+`.wabachi/architecture.json` document using the repository's documented
+schema, then validate it before rendering. To discover the current Canon shape
+and obtain a minimal valid starting document, run the read-only example command
+and redirect it explicitly:
 
 ```bash
 wabachi architecture --help
-wabachi architecture example > ./architecture.json
+mkdir -p .wabachi
+wabachi architecture example > ./.wabachi/architecture.json
 ```
 
 The example is printed from the installed package and is not written by
-Wabachi. It is a starting point for explicit authoring, not an implicit init
-or edit workflow.
+Wabachi. It is a starting point for explicit authoring, not an implicit init or
+edit workflow. Omitted-file validation and rendering resolve exactly
+`.wabachi/architecture.json`; an explicit `<file>` remains an override.
 
 ```bash
-wabachi architecture validate ./architecture.json
-wabachi architecture validate ./architecture.json --json
+wabachi architecture validate
+wabachi architecture validate ./.wabachi/architecture.json --json
 ```
 
 Rendering uses the bundled React Flow + ELK renderer and requires only the
@@ -87,12 +90,13 @@ generated documentation and local static diagrams beneath the directory passed
 to `--out`:
 
 ```bash
-wabachi architecture render ./architecture.json --out ./artifacts/site
+wabachi architecture render --out ./artifacts/site
 ```
 
-The normal documentation path is: author the explicit Canon, validate that
-same file, then render it into a retained site. The matching live playbook is
-`wabachi skill architecture-documentation`.
+The normal documentation path is: author the conventional Canon, validate it,
+then render it into a retained site. The matching live playbook is
+`wabachi skill architecture-documentation`. Passing an explicit Canon path to
+either command preserves the same workflow for another file.
 
 ## Common failures and recovery
 

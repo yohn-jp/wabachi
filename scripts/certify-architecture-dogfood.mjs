@@ -190,12 +190,12 @@ async function main() {
     }
     console.log(`real Structurizr version evidence: ${version.stdout.trim().replace(/\s+/gu, " ")}`);
 
-    const validateArgs = ["architecture", "validate", "architecture/wabachi.json"];
+    const validateArgs = ["architecture", "validate"];
     console.log(`production CLI validate argv: ${JSON.stringify(validateArgs)}`);
     await requireSuccess("production architecture validate", await runProductionCli(validateArgs));
 
     const outputRoot = path.join(temporaryRoot, "output");
-    const renderArgs = ["architecture", "render", "architecture/wabachi.json", "--out", outputRoot];
+    const renderArgs = ["architecture", "render", "--out", outputRoot];
     console.log(`production CLI render argv: ${JSON.stringify(renderArgs)}`);
     await requireSuccess("production architecture render", await runProductionCli(renderArgs));
     const artifacts = await assertArchitectureArtifacts(outputRoot);

@@ -9,7 +9,7 @@ import { buildArchitectureSite } from "./documentation/site.js";
 import { projectArchitectureDocumentToReactFlow } from "./projection/react-flow.js";
 import { projectArchitectureDocumentToStructurizr } from "./projection/structurizr.js";
 
-const canonPath = path.resolve("architecture/wabachi.json");
+const canonPath = path.resolve(".wabachi/architecture.json");
 
 test("Wabachi's checked-in architecture Canon dogfoods the production React Flow site", async () => {
   const document = parseCanonicalArchitectureDocument(await readFile(canonPath, "utf8"));

@@ -29,7 +29,14 @@ test("the command contract covers the supported Wabachi surface", () => {
     ],
   );
   assert.deepEqual(Object.keys(COMMAND_OPTIONS).sort(), ["config", "help", "json", "out", "revision", "version"]);
-  assert.match(commandUsage("architecture.render"), /^usage: wabachi architecture render <file>/u);
+  assert.equal(
+    commandUsage("architecture.validate"),
+    "usage: wabachi architecture validate [file] [--help[=full|json]] [--json]",
+  );
+  assert.equal(
+    commandUsage("architecture.render"),
+    "usage: wabachi architecture render [file] [--help[=full|json]] [--out <dir>] [--json]",
+  );
   assert.doesNotMatch(commandUsage("architecture.render"), /structurizr/u);
   assert.match(projectCommandHelp(["architecture", "render", "canon.json"])?.summary ?? "", /React Flow \+ ELK/u);
   assert.equal(commandExample("matrix.execute"), "wabachi matrix <repository> --revision <sha> --out <dir>");
@@ -40,6 +47,7 @@ test("the command contract covers the supported Wabachi surface", () => {
 test("progressive help resolves root, domain, and leaf projections", () => {
   assert.equal(getCommandForPositionals([])?.id, "root.help");
   assert.equal(getCommandForPositionals(["architecture"])?.id, "architecture.help");
+  assert.equal(getCommandForPositionals(["architecture", "validate"])?.id, "architecture.validate");
   assert.equal(getCommandForPositionals(["architecture", "validate", "canon.json"])?.id, "architecture.validate");
 
   const root = projectCommandHelp([]);
