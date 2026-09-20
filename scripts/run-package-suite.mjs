@@ -17,9 +17,39 @@ function run(command, args, options = {}) {
   return result;
 }
 
+function validateWorkingSetQualityCorpus() {
+  for (const requiredPath of [
+    "src/working-set/quality.ts",
+    "src/working-set/quality.test.ts",
+    "src/working-set/fixtures/quality-corpus-v1.json",
+    "docs/WORKING_SET_QUALITY.md",
+  ]) {
+    if (!fs.existsSync(path.join(repoRoot, requiredPath))) {
+      throw new Error(`working-set quality contract is missing required source asset "${requiredPath}"`);
+    }
+  }
+
+  const corpus = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "src/working-set/fixtures/quality-corpus-v1.json"), "utf8"),
+  );
+  if (
+    corpus.kind !== "working-set-quality-corpus" ||
+    corpus.schemaVersion !== 1 ||
+    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(corpus.revision) ||
+    !Array.isArray(corpus.cases) ||
+    corpus.cases.some(
+      (qualityCase) => qualityCase.revision !== corpus.revision || qualityCase.candidate?.revision !== corpus.revision,
+    )
+  ) {
+    throw new Error("working-set quality corpus is not pinned to one immutable revision");
+  }
+}
+
 function main() {
   const distEntry = path.join(repoRoot, "dist", "index.js");
   if (!fs.existsSync(distEntry)) throw new Error("dist is missing; run pnpm run build before the package suite");
+
+  validateWorkingSetQualityCorpus();
 
   const packResult = run("npm", ["pack", "--dry-run", "--json"]);
   const packReport = JSON.parse(packResult.stdout);
