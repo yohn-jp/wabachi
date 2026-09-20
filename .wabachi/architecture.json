@@ -10,11 +10,6 @@
     { "id": "analysis-runtime", "kind": "system" },
     { "id": "architecture-command", "kind": "service", "parentId": "wabachi-cli" },
     { "id": "architecture-documentation", "kind": "system" },
-    {
-      "id": "architecture-export-adapter",
-      "kind": "component",
-      "parentId": "static-site"
-    },
     { "id": "canon-service", "kind": "service", "parentId": "architecture-documentation" },
     { "id": "correlation-engine", "kind": "component", "parentId": "provider-workflow" },
     {
@@ -35,12 +30,6 @@
     { "id": "run-manifest", "kind": "component", "parentId": "provider-workflow" },
     { "id": "scip-provider", "kind": "component", "parentId": "provider-workflow" },
     { "id": "static-site", "kind": "service", "parentId": "architecture-documentation" },
-    {
-      "id": "structurizr-projection",
-      "kind": "service",
-      "parentId": "architecture-documentation"
-    },
-    { "id": "structurizr-vnext", "kind": "external-system" },
     { "id": "typescript-provider", "kind": "component", "parentId": "provider-workflow" },
     { "id": "wabachi-cli", "kind": "system" }
   ],
@@ -118,30 +107,6 @@
       "technology": "observation envelope v1"
     },
     {
-      "id": "site-export-request",
-      "owner": "architecture-export-adapter",
-      "protocol": "in-process API",
-      "technology": "static site export request"
-    },
-    {
-      "id": "structurizr-export",
-      "owner": "structurizr-vnext",
-      "protocol": "CLI",
-      "technology": "Structurizr static export"
-    },
-    {
-      "id": "structurizr-projection-input",
-      "owner": "structurizr-projection",
-      "protocol": "in-process API",
-      "technology": "Structurizr DSL"
-    },
-    {
-      "id": "structurizr-site",
-      "owner": "static-site",
-      "protocol": "filesystem",
-      "technology": "workspace.dsl and diagrams"
-    },
-    {
       "id": "typescript-observation",
       "owner": "provider-workflow",
       "protocol": "JSONL",
@@ -182,18 +147,8 @@
       "kind": "calls"
     },
     {
-      "source": "architecture-export-adapter",
-      "target": "structurizr-vnext",
-      "kind": "calls"
-    },
-    {
       "source": "canon-service",
       "target": "documentation-projection",
-      "kind": "calls"
-    },
-    {
-      "source": "canon-service",
-      "target": "structurizr-projection",
       "kind": "calls"
     },
     {
@@ -240,16 +195,6 @@
       "source": "scip-provider",
       "target": "provider-workflow",
       "kind": "data"
-    },
-    {
-      "source": "static-site",
-      "target": "architecture-export-adapter",
-      "kind": "calls"
-    },
-    {
-      "source": "structurizr-projection",
-      "target": "static-site",
-      "kind": "calls"
     },
     {
       "source": "typescript-provider",
@@ -312,12 +257,6 @@
         "id": "site-rendering-responsibility",
         "target": { "kind": "object", "id": "static-site" },
         "concern": "Assembles the complete disposable architecture static site"
-      },
-      {
-        "kind": "responsibility",
-        "id": "structurizr-export-responsibility",
-        "target": { "kind": "object", "id": "architecture-export-adapter" },
-        "concern": "Invokes the real Structurizr static export executable"
       }
     ]
   },
@@ -344,14 +283,7 @@
     {
       "id": "architecture-documentation-boundary",
       "kind": "semantic",
-      "memberIds": [
-        "architecture-documentation",
-        "architecture-export-adapter",
-        "canon-service",
-        "documentation-projection",
-        "static-site",
-        "structurizr-projection"
-      ]
+      "memberIds": ["architecture-documentation", "canon-service", "documentation-projection", "static-site"]
     },
     {
       "id": "evaluation-projection-boundary",
@@ -370,12 +302,6 @@
       "source": "analysis-command",
       "target": "provider-matrix",
       "through": "provider-workflow"
-    },
-    {
-      "kind": "must-go-through",
-      "source": "architecture-command",
-      "target": "structurizr-vnext",
-      "through": "architecture-export-adapter"
     },
     {
       "kind": "must-not-depend-on",
@@ -446,24 +372,8 @@
           "operation": "project documentation model"
         },
         {
-          "interfaceId": "structurizr-projection-input",
-          "operation": "project Structurizr DSL"
-        },
-        {
           "interfaceId": "documentation-site",
           "operation": "write index.html"
-        },
-        {
-          "interfaceId": "structurizr-site",
-          "operation": "write workspace.dsl"
-        },
-        {
-          "interfaceId": "site-export-request",
-          "operation": "request static export"
-        },
-        {
-          "interfaceId": "structurizr-export",
-          "operation": "render diagrams and static site"
         }
       ]
     }
@@ -565,14 +475,6 @@
       "tests": []
     },
     {
-      "canonId": "architecture-export-adapter",
-      "paths": [{ "path": "src/architecture/projection/structurizr-export.ts", "scope": "file" }],
-      "symbols": [
-        { "path": "src/architecture/projection/structurizr-export.ts", "symbol": "runStructurizrStaticExport" }
-      ],
-      "tests": []
-    },
-    {
       "canonId": "canon-service",
       "paths": [{ "path": "src/architecture/canon", "scope": "directory" }],
       "symbols": [{ "path": "src/architecture/canon/document.ts", "symbol": "createArchitectureDocument" }],
@@ -648,14 +550,6 @@
       "tests": []
     },
     {
-      "canonId": "structurizr-projection",
-      "paths": [{ "path": "src/architecture/projection/structurizr.ts", "scope": "file" }],
-      "symbols": [
-        { "path": "src/architecture/projection/structurizr.ts", "symbol": "projectArchitectureDocumentToStructurizr" }
-      ],
-      "tests": []
-    },
-    {
       "canonId": "typescript-provider",
       "paths": [{ "path": "src/runtime/typescriptProvider.ts", "scope": "file" }],
       "symbols": [{ "path": "src/runtime/typescriptProvider.ts", "symbol": "createTypeScriptProvider" }],
@@ -678,7 +572,7 @@
         "title": "Canon is the authority and site output is a projection",
         "status": "accepted",
         "type": "architecture",
-        "rationale": "The Architecture Documentation domain accepts an explicit Canon document, then independently projects documentation HTML and Structurizr workspace/site artifacts. Generated output is disposable and does not replace the hand-authored Canon.",
+        "rationale": "The Architecture Documentation domain accepts an explicit Canon document, then independently projects renderer-neutral documentation data and disposable static-site artifacts. Generated output does not replace the hand-authored Canon.",
         "targetIds": ["architecture-documentation", "canon-service", "static-site"],
         "referenceIds": ["architecture-cli-contract", "architecture-site-contract", "issue-43"],
         "supersedes": []
@@ -721,7 +615,7 @@
         "id": "architecture-site-contract",
         "label": "Architecture site assembly",
         "uri": "src/architecture/documentation/site.ts",
-        "description": "Production assembly edge for HTML, DSL, projection losses, and Structurizr export."
+        "description": "Production assembly edge for documentation HTML, diagram assets, and projection losses."
       },
       {
         "id": "issue-43",
@@ -745,13 +639,13 @@
           { "kind": "element", "id": "analysis-runtime" },
           { "kind": "element", "id": "architecture-documentation" },
           { "kind": "element", "id": "repository-input" },
-          { "kind": "element", "id": "structurizr-vnext" },
           { "kind": "element", "id": "wabachi-cli" }
         ],
         "exclude": []
       },
       "order": 1,
-      "title": "Wabachi current implemented architecture",
+      "title": "Wabachi architecture and documentation responsibilities",
+      "description": "Stable runtime responsibilities and the renderer-neutral architecture documentation path.",
       "presentation": { "layout": "auto", "direction": "lr" }
     },
     {
@@ -769,7 +663,8 @@
       "scope": { "include": [{ "kind": "flow", "id": "architecture-render-flow" }], "exclude": [] },
       "root": { "kind": "element", "id": "architecture-documentation" },
       "order": 3,
-      "title": "Architecture Documentation render",
+      "title": "Renderer-neutral architecture documentation render",
+      "description": "Load the Canon, project renderer-neutral documentation data, and assemble static-site artifacts.",
       "presentation": { "layout": "auto", "direction": "lr" }
     },
     {
@@ -804,7 +699,6 @@
       { "id": "architecture-documentation", "namespace": "element" },
       { "id": "architecture-documentation-boundary", "namespace": "boundary" },
       { "id": "architecture-documentation-decision", "namespace": "decision" },
-      { "id": "architecture-export-adapter", "namespace": "element" },
       { "id": "architecture-render", "namespace": "interface" },
       { "id": "architecture-render-flow", "namespace": "flow" },
       { "id": "architecture-site-contract", "namespace": "reference" },
@@ -841,15 +735,8 @@
       { "id": "run-manifest", "namespace": "element" },
       { "id": "scip-observation", "namespace": "interface" },
       { "id": "scip-provider", "namespace": "element" },
-      { "id": "site-export-request", "namespace": "interface" },
       { "id": "site-rendering-responsibility", "namespace": "responsibility" },
       { "id": "static-site", "namespace": "element" },
-      { "id": "structurizr-export", "namespace": "interface" },
-      { "id": "structurizr-export-responsibility", "namespace": "responsibility" },
-      { "id": "structurizr-projection-input", "namespace": "interface" },
-      { "id": "structurizr-projection", "namespace": "element" },
-      { "id": "structurizr-site", "namespace": "interface" },
-      { "id": "structurizr-vnext", "namespace": "element" },
       { "id": "typescript-observation", "namespace": "interface" },
       { "id": "typescript-provider", "namespace": "element" },
       { "id": "wabachi", "namespace": "architecture" },

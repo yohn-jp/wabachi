@@ -11,7 +11,7 @@ import { projectArchitectureDocumentToStructurizr } from "./projection/structuri
 
 const canonPath = path.resolve(".wabachi/architecture.json");
 
-test("Wabachi's checked-in architecture Canon dogfoods the production React Flow site", async () => {
+test("Wabachi's checked-in architecture Canon dogfoods the production site and optional interoperability", async () => {
   const document = parseCanonicalArchitectureDocument(await readFile(canonPath, "utf8"));
   const documentation = projectArchitectureDocument(document);
   const reactFlow = await projectArchitectureDocumentToReactFlow(document);
@@ -22,6 +22,10 @@ test("Wabachi's checked-in architecture Canon dogfoods the production React Flow
     assert.equal(document.canonVersion, 1);
     assert.equal(document.root.id, "wabachi");
     assert.ok(document.elements.some((element) => element.id === "architecture-documentation"));
+    assert.equal(
+      document.elements.some((element) => /structurizr/iu.test(element.id)),
+      false,
+    );
     assert.ok(document.flows.some((flow) => flow.id === "architecture-render-flow"));
     assert.deepEqual(
       document.views.map((view) => view.kind),
@@ -34,6 +38,7 @@ test("Wabachi's checked-in architecture Canon dogfoods the production React Flow
     assert.equal(document.decisions.decisions.length, 3);
     assert.equal(document.decisions.references.length, 4);
     assert.equal(document.decisions.referenceAttachments.length, 3);
+    assert.equal(JSON.stringify(document).match(/structurizr/giu), null);
 
     assert.equal(documentation.documentId, document.documentId);
     assert.equal(reactFlow.documentId, document.documentId);
