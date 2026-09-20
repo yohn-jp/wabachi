@@ -23,7 +23,7 @@ export type CommandId =
   | "architecture.render"
   | "skill.index"
   | "skill.scenario";
-export type OptionId = "help" | "version" | "json" | "revision" | "out" | "config" | "structurizrCommand";
+export type OptionId = "help" | "version" | "json" | "revision" | "out" | "config";
 
 export interface CommandOptionDefinition {
   readonly id: OptionId;
@@ -91,14 +91,6 @@ export const COMMAND_OPTIONS: Readonly<Record<OptionId, CommandOptionDefinition>
     "required",
     "JSON workflow configuration for the provider matrix.",
     "path",
-  ),
-  structurizrCommand: option(
-    "structurizrCommand",
-    ["--structurizr-command"],
-    "string",
-    "required",
-    "Structurizr CLI executable used for static export.",
-    "executable-path",
   ),
 };
 
@@ -171,7 +163,7 @@ export const COMMANDS: readonly CommandDefinition[] = [
     "architecture",
     "help",
     ["architecture"],
-    "Discover Architecture Canon validation and rendering commands.",
+    "Discover Architecture Canon validation and npm-native React Flow + ELK rendering commands.",
     ["help"],
     ["wabachi architecture --help"],
   ),
@@ -190,8 +182,8 @@ export const COMMANDS: readonly CommandDefinition[] = [
     "architecture",
     "render",
     ["architecture", "render"],
-    "Render one explicit Architecture Canon document as a site.",
-    ["help", "out", "structurizrCommand", "json"],
+    "Render one explicit Architecture Canon document as a React Flow + ELK static site.",
+    ["help", "out", "json"],
     ["wabachi architecture render <file> --out <dir>", "wabachi architecture render <file> --out <dir> --json"],
     "<file>",
   ),

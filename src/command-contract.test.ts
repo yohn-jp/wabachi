@@ -27,17 +27,10 @@ test("the command contract covers the supported Wabachi surface", () => {
       "skill.scenario",
     ],
   );
-  assert.deepEqual(Object.keys(COMMAND_OPTIONS).sort(), [
-    "config",
-    "help",
-    "json",
-    "out",
-    "revision",
-    "structurizrCommand",
-    "version",
-  ]);
+  assert.deepEqual(Object.keys(COMMAND_OPTIONS).sort(), ["config", "help", "json", "out", "revision", "version"]);
   assert.match(commandUsage("architecture.render"), /^usage: wabachi architecture render <file>/u);
-  assert.match(commandUsage("architecture.render"), /--structurizr-command <executable-path>/u);
+  assert.doesNotMatch(commandUsage("architecture.render"), /structurizr/u);
+  assert.match(projectCommandHelp(["architecture", "render", "canon.json"])?.summary ?? "", /React Flow \+ ELK/u);
   assert.equal(commandExample("matrix.execute"), "wabachi matrix <repository> --revision <sha> --out <dir>");
   assert.doesNotMatch(commandUsage("root.help"), /--version/u);
   assert.equal(commandUsage("root.version"), "usage: wabachi --version");
@@ -66,7 +59,7 @@ test("progressive help resolves root, domain, and leaf projections", () => {
   assert.equal(leaf?.kind, "leaf");
   assert.deepEqual(
     leaf?.options.map((option) => option.id),
-    ["help", "out", "structurizrCommand", "json"],
+    ["help", "out", "json"],
   );
 });
 

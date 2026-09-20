@@ -142,21 +142,22 @@ export async function assertArchitectureArtifacts(outputRoot) {
     throw new Error("generated site is missing its artifact navigation");
   }
 
-  const workspace = await readFile(path.join(outputRoot, "workspace.dsl"), "utf8");
-  if (!workspace.startsWith('workspace "wabachi-architecture-v1"')) {
-    throw new Error("generated workspace DSL is missing or does not describe Wabachi");
-  }
-
   const report = JSON.parse(await readFile(path.join(outputRoot, "projection-losses.json"), "utf8"));
   if (!Array.isArray(report.losses) || report.losses.length === 0) {
     throw new Error("generated site is missing a visible non-empty projection-loss report");
   }
 
-  const diagrams = await readdir(path.join(outputRoot, "diagrams"));
-  if (!diagrams.includes("index.html")) {
-    throw new Error("generated site is missing real Structurizr static diagram-site output");
+  const diagramsHtml = await readFile(path.join(outputRoot, "diagrams", "index.html"), "utf8");
+  if (!diagramsHtml.includes("react-flow-view")) {
+    throw new Error("generated site is missing real React Flow static diagram output");
   }
-  return Object.freeze({ documentation: true, workspace: true, projectionLosses: report.losses.length, diagrams });
+  const diagramsCss = await readFile(path.join(outputRoot, "diagrams", "wabachi-react-flow.css"), "utf8");
+  if (!diagramsCss.includes("wabachi-react-flow")) {
+    throw new Error("generated site is missing its React Flow stylesheet");
+  }
+
+  const diagrams = await readdir(path.join(outputRoot, "diagrams"));
+  return Object.freeze({ documentation: true, projectionLosses: report.losses.length, diagrams });
 }
 
 async function provisionPinnedImage() {
@@ -194,15 +195,7 @@ async function main() {
     await requireSuccess("production architecture validate", await runProductionCli(validateArgs));
 
     const outputRoot = path.join(temporaryRoot, "output");
-    const renderArgs = [
-      "architecture",
-      "render",
-      "architecture/wabachi.json",
-      "--out",
-      outputRoot,
-      "--structurizr-command",
-      shim,
-    ];
+    const renderArgs = ["architecture", "render", "architecture/wabachi.json", "--out", outputRoot];
     console.log(`production CLI render argv: ${JSON.stringify(renderArgs)}`);
     await requireSuccess("production architecture render", await runProductionCli(renderArgs));
     const artifacts = await assertArchitectureArtifacts(outputRoot);

@@ -69,20 +69,14 @@ wabachi architecture validate ./architecture.json
 wabachi architecture validate ./architecture.json --json
 ```
 
-Rendering requires the Structurizr CLI. Wabachi writes the generated site and
-static diagrams beneath the directory passed to `--out`:
+Rendering uses the bundled React Flow + ELK renderer and requires only the
+supported Node.js/npm environment. No Java, Docker, Chromium, Structurizr,
+CDN, or network access is required by the render command. Wabachi writes the
+generated documentation and local static diagrams beneath the directory passed
+to `--out`:
 
 ```bash
 wabachi architecture render ./architecture.json --out ./artifacts/site
-```
-
-If `structurizr` is not on `PATH`, provide one executable identity without
-changing the workflow:
-
-```bash
-wabachi architecture render ./architecture.json \
-  --out ./artifacts/site \
-  --structurizr-command /opt/structurizr/structurizr.sh
 ```
 
 The normal documentation path is: author the explicit Canon, validate that
@@ -99,9 +93,8 @@ same file, then render it into a retained site. The matching live playbook is
   with the installed provider set.
 - If Canon validation fails, fix the reported document issue and validate the
   same file again before rendering. `--json` is useful for automation.
-- If rendering fails before export, validate the Canon and check that the
-  Structurizr executable can run. Use `--structurizr-command` for a deliberate
-  executable override and inspect the retained output directory.
+- If rendering fails, validate the Canon and inspect the bounded output
+  directory. The render command does not invoke an external diagram executable.
 - If syntax is uncertain, stop relying on a copied example and resolve the
   current contract with `wabachi architecture --help` or the relevant leaf
   help. Unsupported commands fail closed.

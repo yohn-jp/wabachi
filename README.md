@@ -53,6 +53,11 @@ Wabachi keeps repository facts and architecture declarations explicit. Repositor
 
 The matrix workflow emits retained artifacts so provider output, correlations, and reports can be inspected rather than treated as opaque agent context.
 
+Architecture rendering is npm-native: `wabachi architecture render
+./architecture.json --out ./artifacts/site` uses the bundled React Flow + ELK
+renderer and does not require Java, Docker, Chromium, Structurizr, a CDN, or
+network access.
+
 ## Development
 
 ```bash
