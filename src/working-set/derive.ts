@@ -10,12 +10,22 @@ import type { CanonicalEntity, CanonicalEntityMember } from "../runtime/correlat
 import type { ArchitectureDocumentV1 } from "../architecture/canon/document.js";
 import type { RepositoryMapping, RepositoryPathMapping } from "../architecture/canon/repository-mappings.js";
 import {
+  CANDIDATE_WORKING_SET_LIMITS,
   createCandidateWorkingSet,
   type CandidateWorkingSet,
   type CandidateWorkingSetState,
+  type RepositoryIdentity,
   type WorkingSetEvidenceReference,
   type WorkingSetTarget,
 } from "./model.js";
+import {
+  authorizationEntries,
+  conflictToWorkingSetEntry,
+  createWorkingSetConflict,
+  type WorkingSetAuthorizationInput,
+  type WorkingSetConflictKind,
+  workingSetTargetKey,
+} from "./conflicts.js";
 import type {
   ResolvedWorkingSetSeed,
   WorkingSetSeed,
@@ -40,6 +50,8 @@ export interface CandidateWorkingSetDerivationInput {
   readonly canon: ArchitectureDocumentV1;
   /** Optional artifact identity; the task identity is used when omitted. */
   readonly workingSetId?: string;
+  /** Optional external authorization boundary used only as comparison evidence. */
+  readonly authorization?: WorkingSetAuthorizationInput;
 }
 
 interface PendingEntry {
@@ -185,10 +197,14 @@ function createMappingIndex(mappings: readonly RepositoryMapping[]): MappingInde
   return { byId: grouped, mappings };
 }
 
-function createEntityIndex(entities: readonly CanonicalEntity[]): EntityIndex {
+function createEntityIndex(entities: readonly CanonicalEntity[], revision?: string): EntityIndex {
+  const currentEntities =
+    revision === undefined
+      ? entities
+      : entities.filter((entity) => entity.repository.commitSha.toLowerCase() === revision.toLowerCase());
   const byId = new Map<string, CanonicalEntity>();
-  for (const entity of entities) byId.set(entity.canonicalId, entity);
-  return { byId, entities };
+  for (const entity of currentEntities) byId.set(entity.canonicalId, entity);
+  return { byId, entities: currentEntities };
 }
 
 function pathMatches(path: RepositoryPathMapping, candidate: string): boolean {
@@ -278,9 +294,9 @@ function sameDeclaredBoundary(
 function addEvidence(target: PendingEntry, references: readonly WorkingSetEvidenceReference[]): void {
   const values = new Map<string, WorkingSetEvidenceReference>();
   for (const reference of [...target.evidence, ...references]) values.set(evidenceKey(reference), reference);
-  target.evidence = [...values.values()].sort(
-    (left, right) => compareText(left.artifact, right.artifact) || compareText(left.reference, right.reference),
-  );
+  target.evidence = [...values.values()]
+    .sort((left, right) => compareText(left.artifact, right.artifact) || compareText(left.reference, right.reference))
+    .slice(0, CANDIDATE_WORKING_SET_LIMITS.maxEvidenceReferencesPerEntry);
 }
 
 function addEntry(
@@ -309,16 +325,19 @@ function addEntry(
   addEvidence(existing, evidence);
 }
 
-function unresolvedSeedTarget(seed: WorkingSetSeed): WorkingSetTarget {
-  return { kind: "unresolved", locator: stableLocator("seed", seedKey(seed)) };
+function addConflict(
+  entries: Map<string, PendingEntry>,
+  kind: WorkingSetConflictKind,
+  locator: string,
+  evidence: readonly WorkingSetEvidenceReference[],
+): void {
+  const conflict = createWorkingSetConflict({ kind, locator, evidence });
+  const entry = conflictToWorkingSetEntry(conflict);
+  addEntry(entries, entry.state, entry.target, entry.reason, entry.evidence);
 }
 
 function unresolvedProviderTarget(subject: string, predicate: string): WorkingSetTarget {
   return { kind: "unresolved", locator: stableLocator("provider", predicate, subject) };
-}
-
-function unresolvedCanonTarget(target: string): WorkingSetTarget {
-  return { kind: "unresolved", locator: stableLocator("canon-component", target) };
 }
 
 function seedEvidence(resolution: ResolvedWorkingSetSeed): readonly WorkingSetEvidenceReference[] {
@@ -340,19 +359,6 @@ function providerReason(predicate: ProviderV1RelationshipClass, fact: FactEnvelo
   return { id: stableId("provider", predicate, fact.factId), summary: "admitted provider relationship evidence" };
 }
 
-function unresolvedReason(kind: "seed" | "provider-ambiguity" | "provider-disagreement" | "canon"): {
-  id: string;
-  summary: string;
-} {
-  const summary = {
-    seed: "seed resolution remained unresolved",
-    "provider-ambiguity": "provider entity correlation remained ambiguous",
-    "provider-disagreement": "providers disagreed about the relationship",
-    canon: "Architecture Canon target has no unique repository mapping",
-  }[kind];
-  return { id: stableId("unresolved", kind), summary };
-}
-
 function isFactEntity(value: FactObject): value is FactEntityReference {
   return "nativeId" in value && "provider" in value;
 }
@@ -365,19 +371,24 @@ function factSubjectKey(fact: FactEnvelope): string | undefined {
   return fact.subject.canonicalId;
 }
 
-function comparisonIndex(providerEvidence: FactNormalizationResult): {
+function comparisonIndex(
+  providerEvidence: FactNormalizationResult,
+  revision: string,
+): {
+  readonly facts: readonly FactEnvelope[];
   readonly byFactId: ReadonlyMap<string, FactComparison>;
   readonly comparisons: readonly FactComparison[];
 } {
-  const comparisons =
-    providerEvidence.comparisons.length > 0
-      ? providerEvidence.comparisons
-      : compareFactSets(providerEvidence.facts, { unsupported: providerEvidence.unsupported });
+  const facts = providerEvidence.facts.filter((fact) => isPinnedRevision(fact, revision));
+  const unsupported = providerEvidence.unsupported.filter(
+    (evidence) => evidence.repository.commitSha.toLowerCase() === revision.toLowerCase(),
+  );
+  const comparisons = compareFactSets(facts, { unsupported });
   const byFactId = new Map<string, FactComparison>();
   for (const comparison of comparisons) {
     for (const fact of comparison.facts) byFactId.set(fact.factId, comparison);
   }
-  return { byFactId, comparisons };
+  return { facts, byFactId, comparisons };
 }
 
 function activeEntitiesForSeeds(
@@ -388,11 +399,20 @@ function activeEntitiesForSeeds(
   for (const resolution of resolutions) {
     if (resolution.status !== "resolved") continue;
     for (const evidence of resolution.evidence) {
-      if (evidence.artifact === "provider-correlation") active.add(evidence.reference);
+      if (evidence.artifact !== "provider-correlation") continue;
+      const entity = entityIndex.byId.get(evidence.reference);
+      if (entity !== undefined && (entity.status === "ambiguous" || entity.candidateCanonicalIds.length > 0)) continue;
+      active.add(evidence.reference);
     }
     for (const target of resolution.targets) {
       for (const entity of entityIndex.entities) {
-        if (entityMatchesTarget(entity, target)) active.add(entity.canonicalId);
+        if (
+          entityMatchesTarget(entity, target) &&
+          entity.status !== "ambiguous" &&
+          entity.candidateCanonicalIds.length === 0
+        ) {
+          active.add(entity.canonicalId);
+        }
       }
     }
   }
@@ -406,9 +426,16 @@ function addUnresolvedSeed(
   const evidence = [
     ...resolution.evidence,
     { artifact: "working-set-seeds", reference: seedKey(resolution.seed) },
+    { artifact: "working-set-seeds", reference: `reason:${resolution.reason}` },
     ...resolution.candidates.map((candidate) => ({ artifact: "working-set-seed-candidate", reference: candidate })),
   ];
-  addEntry(entries, "unresolved", unresolvedSeedTarget(resolution.seed), unresolvedReason("seed"), evidence);
+  const kind: WorkingSetConflictKind =
+    resolution.reason === "ambiguous"
+      ? "ambiguity"
+      : resolution.reason === "repository-mismatch"
+        ? "stale-evidence"
+        : "mapping-gap";
+  addConflict(entries, kind, stableLocator("seed", seedKey(resolution.seed)), evidence);
 }
 
 function addMappingTargets(
@@ -491,11 +518,11 @@ function providerSourceIsActive(reference: FactEntityReference, activeEntities: 
 function addProviderUnresolved(
   entries: Map<string, PendingEntry>,
   fact: FactEnvelope,
-  kind: "provider-ambiguity" | "provider-disagreement",
+  kind: Extract<WorkingSetConflictKind, "ambiguity" | "disagreement" | "insufficient-evidence">,
   evidence: readonly WorkingSetEvidenceReference[],
 ): void {
   const subject = fact.subject.canonicalId ?? fact.subject.nativeId;
-  addEntry(entries, "unresolved", unresolvedProviderTarget(subject, fact.predicate), unresolvedReason(kind), evidence);
+  addConflict(entries, kind, unresolvedProviderTarget(subject, fact.predicate).locator, evidence);
 }
 
 function expandCanon(
@@ -514,13 +541,8 @@ function expandCanon(
     for (const target of resolution.targets) {
       const componentIds = componentIdsForTarget(mappingIndex, target);
       if (componentIds.length > 1) {
-        addEntry(
-          entries,
-          "unresolved",
-          { kind: "unresolved", locator: stableLocator("canon-mapping", target.locator) },
-          unresolvedReason("canon"),
-          resolution.evidence,
-        );
+        addConflict(entries, "ambiguity", stableLocator("canon-mapping", target.locator), resolution.evidence);
+        continue;
       }
       for (const componentId of componentIds) {
         if (!activeComponents.has(componentId)) activeComponents.add(componentId);
@@ -532,7 +554,12 @@ function expandCanon(
     }
     if (resolution.seed.kind === "architecture-component") {
       const componentId = resolution.seed.componentId;
-      if ((mappingIndex.byId.get(componentId) ?? []).length === 1) {
+      const mappings = mappingIndex.byId.get(componentId) ?? [];
+      if (mappings.length === 1) {
+        if (mappings[0].paths.length === 0 && mappings[0].symbols.length === 0 && mappings[0].tests.length === 0) {
+          addConflict(entries, "mapping-gap", stableLocator("canon-component", componentId), resolution.evidence);
+          continue;
+        }
         activeComponents.add(componentId);
         if (!queued.has(componentId)) {
           queued.add(componentId);
@@ -557,13 +584,20 @@ function expandCanon(
       const kind = relationship.kind as CanonV1RelationshipClass;
       const relationEvidence = relationshipEvidence(source, kind, relationship.target, relationship.interfaceId);
       const reason = canonReason(kind, source, relationship.target);
+      const mappings = mappingIndex.byId.get(relationship.target) ?? [];
+      if (mappings.length === 0) {
+        addConflict(entries, "mapping-gap", stableLocator("canon-component", relationship.target), [relationEvidence]);
+        continue;
+      }
+      if (mappings.length > 1) {
+        addConflict(entries, "ambiguity", stableLocator("canon-component", relationship.target), [relationEvidence]);
+        continue;
+      }
       const mapped = addComponentMapping(entries, mappingIndex, relationship.target, CANON_STATE[kind], reason, [
         relationEvidence,
       ]);
       if (!mapped) {
-        addEntry(entries, "unresolved", unresolvedCanonTarget(relationship.target), unresolvedReason("canon"), [
-          relationEvidence,
-        ]);
+        addConflict(entries, "mapping-gap", stableLocator("canon-component", relationship.target), [relationEvidence]);
         continue;
       }
 
@@ -588,12 +622,13 @@ function deriveProviderEvidence(
   entries: Map<string, PendingEntry>,
   providerEvidence: FactNormalizationResult,
   entityIndex: EntityIndex,
+  staleEntityIds: ReadonlySet<string>,
   mappingIndex: MappingIndex,
   activeEntities: Set<string>,
   activeComponents: ReadonlySet<string>,
   revision: string,
 ): void {
-  const { byFactId } = comparisonIndex(providerEvidence);
+  const { facts, byFactId } = comparisonIndex(providerEvidence, revision);
   for (const entity of entityIndex.entities) {
     if (componentIdsForEntity(mappingIndex, entity).some((componentId) => activeComponents.has(componentId))) {
       activeEntities.add(entity.canonicalId);
@@ -601,8 +636,16 @@ function deriveProviderEvidence(
   }
   const processedDisagreements = new Set<string>();
 
-  for (const fact of providerEvidence.facts) {
-    if (!isProviderRelationship(fact.predicate) || !isPinnedRevision(fact, revision)) continue;
+  for (const fact of facts) {
+    if (!isProviderRelationship(fact.predicate)) continue;
+    const staleObject =
+      isFactEntity(fact.object) && fact.object.canonicalId !== undefined
+        ? staleEntityIds.has(fact.object.canonicalId)
+        : false;
+    if ((fact.subject.canonicalId !== undefined && staleEntityIds.has(fact.subject.canonicalId)) || staleObject) {
+      addConflict(entries, "stale-evidence", stableLocator("provider-fact", fact.factId), [providerFactEvidence(fact)]);
+      continue;
+    }
     const subjectKey = factSubjectKey(fact);
     if (!providerSourceIsActive(fact.subject, activeEntities)) continue;
 
@@ -613,9 +656,12 @@ function deriveProviderEvidence(
         addProviderUnresolved(
           entries,
           fact,
-          "provider-disagreement",
+          "disagreement",
           comparison.facts.flatMap((candidate) => [
             providerFactEvidence(candidate),
+            ...(isFactEntity(candidate.object) && candidate.object.canonicalId !== undefined
+              ? [{ artifact: "provider-correlation", reference: candidate.object.canonicalId }]
+              : []),
             ...candidate.subject.candidateCanonicalIds.map((id) => ({
               artifact: "provider-correlation",
               reference: id,
@@ -628,7 +674,7 @@ function deriveProviderEvidence(
 
     const subjectEntity = subjectKey === undefined ? undefined : entityIndex.byId.get(subjectKey);
     if (!isFactEntity(fact.object)) {
-      addProviderUnresolved(entries, fact, "provider-ambiguity", [providerFactEvidence(fact)]);
+      addProviderUnresolved(entries, fact, "ambiguity", [providerFactEvidence(fact)]);
       continue;
     }
 
@@ -642,7 +688,7 @@ function deriveProviderEvidence(
       fact.subject.correlationStatus === "ambiguous" ||
       fact.subject.candidateCanonicalIds.length > 0
     ) {
-      addProviderUnresolved(entries, fact, "provider-ambiguity", [
+      addProviderUnresolved(entries, fact, "ambiguity", [
         providerFactEvidence(fact),
         ...fact.object.candidateCanonicalIds.map((id) => ({ artifact: "provider-correlation", reference: id })),
       ]);
@@ -654,7 +700,7 @@ function deriveProviderEvidence(
     const evidence = [providerFactEvidence(fact), canonicalEntityEvidence(targetEntity)];
     const targets = entityTargetMembers(targetEntity);
     if (targets.length === 0) {
-      addProviderUnresolved(entries, fact, "provider-ambiguity", evidence);
+      addProviderUnresolved(entries, fact, "insufficient-evidence", evidence);
       continue;
     }
     for (const target of targets) addEntry(entries, PROVIDER_STATE[predicate], target, reason, evidence);
@@ -662,15 +708,13 @@ function deriveProviderEvidence(
     // Repository tests are verification context, never required execution
     // targets, even when their component is reached through provider evidence.
     const componentIds = componentIdsForEntity(mappingIndex, targetEntity);
-    if (componentIds.length > 1) {
-      addEntry(
-        entries,
-        "unresolved",
-        unresolvedProviderTarget(targetEntity.canonicalId, "canon-mapping"),
-        unresolvedReason("canon"),
-        evidence,
-      );
+    if (componentIds.length === 0) {
+      addConflict(entries, "mapping-gap", stableLocator("provider-entity", targetEntity.canonicalId), evidence);
     }
+    if (componentIds.length > 1) {
+      addConflict(entries, "ambiguity", stableLocator("provider-entity", targetEntity.canonicalId), evidence);
+    }
+    if (componentIds.length !== 1) continue;
     for (const componentId of componentIds) {
       const mapping = mappingIndex.byId.get(componentId)?.[0];
       if (mapping === undefined) continue;
@@ -688,6 +732,93 @@ function deriveProviderEvidence(
   }
 }
 
+function addStaleEvidenceConflicts(
+  entries: Map<string, PendingEntry>,
+  providerEvidence: FactNormalizationResult,
+  revision: string,
+): Set<string> {
+  const staleEntityIds = new Set<string>();
+  for (const entity of providerEvidence.correlation.canonicalEntities) {
+    if (entity.repository.commitSha.toLowerCase() !== revision.toLowerCase()) {
+      staleEntityIds.add(entity.canonicalId);
+      addConflict(entries, "stale-evidence", stableLocator("provider-correlation", entity.canonicalId), [
+        canonicalEntityEvidence(entity),
+      ]);
+    }
+  }
+  for (const fact of providerEvidence.facts) {
+    if (!isPinnedRevision(fact, revision)) {
+      addConflict(entries, "stale-evidence", stableLocator("provider-fact", fact.factId), [providerFactEvidence(fact)]);
+    }
+  }
+  for (const evidence of providerEvidence.unsupported) {
+    if (evidence.repository.commitSha.toLowerCase() !== revision.toLowerCase()) {
+      addConflict(entries, "stale-evidence", stableLocator("provider-evidence", evidence.nativeEvidence.id), [
+        { artifact: "provider-evidence", reference: evidence.nativeEvidence.id },
+      ]);
+    }
+  }
+  return staleEntityIds;
+}
+
+function sameRepository(left: RepositoryIdentity, right: RepositoryIdentity): boolean {
+  return (
+    left.repositoryHost === right.repositoryHost &&
+    left.repositoryId === right.repositoryId &&
+    left.repository === right.repository
+  );
+}
+
+function targetReference(target: WorkingSetTarget): string {
+  return `${target.kind}:${target.locator}`;
+}
+
+function addAuthorizationConflicts(
+  entries: Map<string, PendingEntry>,
+  authorization: WorkingSetAuthorizationInput | undefined,
+  repository: RepositoryIdentity,
+  revision: string,
+): void {
+  if (authorization === undefined) return;
+
+  const comparisonEvidence = [
+    {
+      artifact: "authorization-comparison",
+      reference: `revision:${authorization.revision ?? revision}`,
+    },
+  ];
+  if (authorization.revision !== undefined && authorization.revision.toLowerCase() !== revision.toLowerCase()) {
+    addConflict(entries, "stale-evidence", "authorization-revision", comparisonEvidence);
+    return;
+  }
+  if (authorization.repository !== undefined && !sameRepository(authorization.repository, repository)) {
+    addConflict(entries, "stale-evidence", "authorization-repository", comparisonEvidence);
+    return;
+  }
+
+  const hasBoundary =
+    authorization.targets !== undefined ||
+    authorization.entries !== undefined ||
+    authorization.authorizedTargets !== undefined;
+  if (!hasBoundary) {
+    addConflict(entries, "insufficient-evidence", "authorization-boundary", comparisonEvidence);
+    return;
+  }
+
+  const authorized = new Set(authorizationEntries(authorization).map(({ target }) => workingSetTargetKey(target)));
+  const requiredEntries = [...entries.values()]
+    .filter((entry) => entry.state === "required" && entry.target.kind !== "unresolved")
+    .sort((left, right) => workingSetTargetKey(left.target).localeCompare(workingSetTargetKey(right.target)));
+  for (const entry of requiredEntries) {
+    if (authorized.has(workingSetTargetKey(entry.target))) continue;
+    addConflict(entries, "required-but-unauthorized", entry.target.locator, [
+      ...entry.evidence,
+      ...comparisonEvidence,
+      { artifact: "authorization-comparison", reference: `not-listed:${targetReference(entry.target)}` },
+    ]);
+  }
+}
+
 /**
  * Derives one authorization-neutral Candidate Working Set from bounded seed
  * resolutions, normalized provider evidence, and the read-only Canon.
@@ -700,8 +831,9 @@ function deriveProviderEvidence(
  */
 export function deriveCandidateWorkingSet(input: CandidateWorkingSetDerivationInput): CandidateWorkingSet {
   const mappingIndex = createMappingIndex(input.canon.repositoryMappings);
-  const entityIndex = createEntityIndex(input.providerEvidence.correlation.canonicalEntities);
+  const entityIndex = createEntityIndex(input.providerEvidence.correlation.canonicalEntities, input.seeds.revision);
   const entries = new Map<string, PendingEntry>();
+  const staleEntityIds = addStaleEvidenceConflicts(entries, input.providerEvidence, input.seeds.revision);
 
   for (const resolution of input.seeds.resolutions) {
     if (resolution.status === "unresolved") {
@@ -715,6 +847,7 @@ export function deriveCandidateWorkingSet(input: CandidateWorkingSetDerivationIn
   }
 
   if (input.seeds.binding !== "matched") {
+    addAuthorizationConflicts(entries, input.authorization, input.seeds.repository, input.seeds.revision);
     return createCandidateWorkingSet({
       workingSetId: input.workingSetId ?? input.seeds.task.taskId,
       repository: input.seeds.repository,
@@ -729,11 +862,13 @@ export function deriveCandidateWorkingSet(input: CandidateWorkingSetDerivationIn
     entries,
     input.providerEvidence,
     entityIndex,
+    staleEntityIds,
     mappingIndex,
     activeEntities,
     activeComponents,
     input.seeds.revision,
   );
+  addAuthorizationConflicts(entries, input.authorization, input.seeds.repository, input.seeds.revision);
 
   return createCandidateWorkingSet({
     workingSetId: input.workingSetId ?? input.seeds.task.taskId,

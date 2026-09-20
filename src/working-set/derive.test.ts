@@ -5,6 +5,7 @@ import { normalizeFacts, type FactObservation } from "../runtime/facts.js";
 import type { ObservationEntity } from "../runtime/observation.js";
 import type { ProviderIdentity } from "../runtime/provider.js";
 import { resolveWorkingSetSeeds, type WorkingSetSeedResolutionContext } from "./seeds.js";
+import { getWorkingSetConflictKind } from "./conflicts.js";
 import { deriveCandidateWorkingSet } from "./derive.js";
 
 const revision = "0123456789abcdef0123456789abcdef01234567";
@@ -235,5 +236,91 @@ test("classifies mapped tests as verification instead of required execution targ
       ["required", { kind: "file", locator: "src/dependency.ts" }],
       ["verification", { kind: "test", locator: "test/dependency.test.ts#dependency" }],
     ],
+  );
+});
+
+test("retains required context and records required-but-unauthorized comparison conflicts", () => {
+  const seed = seedResolution({ kind: "architecture-component", componentId: "app" }, [
+    { canonId: "app", paths: [{ path: "src/app.ts" }] },
+  ]);
+  const result = deriveCandidateWorkingSet({
+    seeds: seed,
+    providerEvidence: normalizeFacts([]),
+    canon: canon({
+      repositoryMappings: [{ canonId: "app", paths: [{ path: "src/app.ts" }] }],
+    }),
+    authorization: { revision, targets: [] },
+  });
+
+  assert.equal(
+    result.entries.some((entry) => entry.state === "required" && entry.target.locator === "src/app.ts"),
+    true,
+  );
+  assert.equal(
+    result.entries.some((entry) => getWorkingSetConflictKind(entry) === "required-but-unauthorized"),
+    true,
+  );
+});
+
+test("does not derive from stale provider evidence and retains a stale-evidence conflict", () => {
+  const seed = seedResolution({ kind: "architecture-component", componentId: "app" }, [
+    { canonId: "app", paths: [{ path: "src/app.ts" }] },
+  ]);
+  const staleFacts = normalizeFacts(
+    [
+      observation(
+        "calls",
+        node("app-a", "function"),
+        node("stale-dependency", "function"),
+        "src/app.ts",
+        "src/stale-dependency.ts",
+      ),
+    ],
+    { providers: [provider] },
+  );
+  const result = deriveCandidateWorkingSet({
+    seeds: seed,
+    providerEvidence: {
+      ...staleFacts,
+      facts: staleFacts.facts.map((fact) => ({
+        ...fact,
+        repository: { ...fact.repository, commitSha: "fedcba9876543210fedcba9876543210fedcba98" },
+      })),
+    },
+    canon: canon({
+      repositoryMappings: [{ canonId: "app", paths: [{ path: "src/app.ts" }] }],
+    }),
+  });
+
+  assert.equal(
+    result.entries.some((entry) => entry.state === "supporting" && entry.target.locator.includes("stale-dependency")),
+    false,
+  );
+  assert.equal(
+    result.entries.some((entry) => getWorkingSetConflictKind(entry) === "stale-evidence"),
+    true,
+  );
+});
+
+test("retains a Canon relationship with no repository mapping as a mapping-gap conflict", () => {
+  const seed = seedResolution({ kind: "architecture-component", componentId: "app" }, [
+    { canonId: "app", paths: [{ path: "src/app.ts" }] },
+  ]);
+  const result = deriveCandidateWorkingSet({
+    seeds: seed,
+    providerEvidence: normalizeFacts([]),
+    canon: canon({
+      repositoryMappings: [{ canonId: "app", paths: [{ path: "src/app.ts" }] }],
+      relationships: [{ source: "app", target: "dependency", kind: "depends-on" }],
+    }),
+  });
+
+  assert.equal(
+    result.entries.some((entry) => getWorkingSetConflictKind(entry) === "mapping-gap"),
+    true,
+  );
+  assert.equal(
+    result.entries.some((entry) => entry.target.locator === "src/dependency.ts"),
+    false,
   );
 });
