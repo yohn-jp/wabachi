@@ -111,6 +111,27 @@ test("missing conventional Canon names the expected path", async () => {
   }
 });
 
+test("render reports a missing explicit Canon with a stable diagnostic", async () => {
+  const directory = await temporaryDirectory();
+  const file = path.join(directory, "missing-architecture.json");
+  const outputRoot = path.join(directory, "site");
+  const output = captureOutput();
+  try {
+    assert.equal(await runArchitectureCli(["render", file, "--out", outputRoot]), 1);
+    assert.equal(output.errors[0], `architecture render: architecture document not found: ${file}`);
+
+    assert.equal(await runArchitectureCli(["render", file, "--out", outputRoot, "--json"]), 1);
+    const result = JSON.parse(output.logs[0] ?? "{}") as {
+      diagnostics?: Array<{ code?: string; message?: string }>;
+    };
+    assert.equal(result.diagnostics?.[0]?.code, "invalid-canon");
+    assert.equal(result.diagnostics?.[0]?.message, `architecture document not found: ${file}`);
+    assert.doesNotMatch(result.diagnostics?.[0]?.message ?? "", /ENOENT/u);
+  } finally {
+    output.restore();
+  }
+});
+
 test("example prints a minimal Canon validated by the real codec without writing a file", async () => {
   const output = captureOutput();
   try {

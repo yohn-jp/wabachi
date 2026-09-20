@@ -97,7 +97,7 @@ test("createIsolatedWorkspace reports tar stderr and exit status", async () => {
   const { repoDir, commitSha } = await createFixtureRepoWithBinaryAsset();
   const fakeBinDir = await newTmpDir("wabachi-fake-tar-");
   const fakeTar = path.join(fakeBinDir, "tar");
-  await writeFile(fakeTar, "#!/bin/sh\nprintf 'forced tar failure\\n' >&2\nexit 23\n", "utf8");
+  await writeFile(fakeTar, "#!/bin/sh\nprintf 'forced tar failure\\n' >&2\ncat >/dev/null\nexit 23\n", "utf8");
   await chmod(fakeTar, 0o755);
 
   const workspaceRoot = await newTmpDir("wabachi-tar-failure-");
