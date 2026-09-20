@@ -42,6 +42,7 @@ export interface CommandDefinition {
   readonly path: readonly string[];
   readonly positionalSyntax?: string;
   readonly optionIds: readonly OptionId[];
+  readonly requiredOptionIds?: readonly OptionId[];
   readonly summary: string;
   readonly examples: readonly string[];
 }
@@ -110,6 +111,7 @@ const command = (
   optionIds: readonly OptionId[],
   examples: readonly string[],
   positionalSyntax?: string,
+  requiredOptionIds?: readonly OptionId[],
 ): CommandDefinition => ({
   id,
   domain,
@@ -119,6 +121,7 @@ const command = (
   optionIds,
   examples,
   ...(positionalSyntax === undefined ? {} : { positionalSyntax }),
+  ...(requiredOptionIds === undefined ? {} : { requiredOptionIds }),
 });
 
 export const COMMANDS: readonly CommandDefinition[] = [
@@ -128,11 +131,21 @@ export const COMMANDS: readonly CommandDefinition[] = [
     "help",
     [],
     "Discover supported commands and resolve exact syntax progressively.",
-    ["help", "version"],
+    ["help"],
     ["wabachi --help", "wabachi --help=full"],
     "[command]",
   ),
-  command("root.version", "root", "version", [], "Print the installed version.", ["version"], ["wabachi --version"]),
+  command(
+    "root.version",
+    "root",
+    "version",
+    [],
+    "Print the installed version.",
+    ["version"],
+    ["wabachi --version"],
+    undefined,
+    ["version"],
+  ),
   command(
     "run.execute",
     "run",
@@ -248,7 +261,13 @@ export function commandUsage(id: CommandId): string {
   const definition = getCommand(id);
   const pathText = [CLI_NAME, ...definition.path].join(" ");
   const positional = definition.positionalSyntax === undefined ? "" : ` ${definition.positionalSyntax}`;
-  const options = definition.optionIds.map((optionId) => ` [${optionSyntax(getOption(optionId))}]`).join("");
+  const options = definition.optionIds
+    .map((optionId) =>
+      definition.requiredOptionIds?.includes(optionId) === true
+        ? ` ${optionSyntax(getOption(optionId))}`
+        : ` [${optionSyntax(getOption(optionId))}]`,
+    )
+    .join("");
   return `usage: ${pathText}${positional}${options}`;
 }
 
@@ -322,12 +341,12 @@ export function projectCommandHelp(
   const isDomain = commandDefinition.id === "architecture.help" || commandDefinition.id === "skill.index";
   const children = isRoot
     ? COMMANDS.filter((entry) =>
-        ["run.execute", "matrix.execute", "architecture.help", "skill.index"].includes(entry.id),
+        ["root.version", "run.execute", "matrix.execute", "architecture.help", "skill.index"].includes(entry.id),
       )
     : isDomain
       ? COMMANDS.filter((entry) => entry.domain === commandDefinition.domain && entry.id !== commandDefinition.id)
       : [];
-  const listedCommands = mode === "full" && isRoot ? COMMANDS.filter((entry) => entry.domain !== "root") : children;
+  const listedCommands = mode === "full" && isRoot ? COMMANDS.filter((entry) => entry.id !== "root.help") : children;
   const optionEntries = commandDefinition.optionIds.map((optionId) => {
     const definition = getOption(optionId);
     return { id: optionId, syntax: optionSyntax(definition), description: definition.description };

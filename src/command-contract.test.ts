@@ -39,6 +39,8 @@ test("the command contract covers the supported Wabachi surface", () => {
   assert.match(commandUsage("architecture.render"), /^usage: wabachi architecture render <file>/u);
   assert.match(commandUsage("architecture.render"), /--structurizr-command <executable-path>/u);
   assert.equal(commandExample("matrix.execute"), "wabachi matrix <repository> --revision <sha> --out <dir>");
+  assert.doesNotMatch(commandUsage("root.help"), /--version/u);
+  assert.equal(commandUsage("root.version"), "usage: wabachi --version");
 });
 
 test("progressive help resolves root, domain, and leaf projections", () => {
@@ -50,7 +52,7 @@ test("progressive help resolves root, domain, and leaf projections", () => {
   assert.equal(root?.kind, "root");
   assert.deepEqual(
     root?.commands.map((entry) => entry.id),
-    ["run.execute", "matrix.execute", "architecture.help", "skill.index"],
+    ["root.version", "run.execute", "matrix.execute", "architecture.help", "skill.index"],
   );
 
   const domain = projectCommandHelp(["architecture"]);
