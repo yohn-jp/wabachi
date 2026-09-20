@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { parseCanonicalArchitectureDocument } from "./canon/codec.js";
+import type { ArchitectureDocumentV1 } from "./canon/document.js";
 import { projectArchitectureDocument } from "./documentation/project.js";
 import { ArchitectureSiteError, buildArchitectureSite } from "./documentation/site.js";
 import { projectArchitectureDocumentToReactFlow } from "./projection/react-flow.js";
@@ -22,6 +23,14 @@ interface ArchitectureDiagnostic {
   readonly message: string;
 }
 
+interface ArchitectureCanonCounts {
+  readonly elements: number;
+  readonly interfaces: number;
+  readonly relationships: number;
+  readonly flows: number;
+  readonly views: number;
+}
+
 function usage(command?: ArchitectureCommand): string {
   if (command === "validate") return commandUsage("architecture.validate");
   if (command === "render") return commandUsage("architecture.render");
@@ -36,6 +45,20 @@ function bounded(value: string): string {
 
 function errorMessage(error: unknown): string {
   return bounded(error instanceof Error ? error.message : String(error));
+}
+
+function architectureCanonCounts(document: ArchitectureDocumentV1): ArchitectureCanonCounts {
+  return {
+    elements: document.elements.length,
+    interfaces: document.interfaces.length,
+    relationships: document.relationships.length,
+    flows: document.flows.length,
+    views: document.views.length,
+  };
+}
+
+function architectureCanonSummary(counts: ArchitectureCanonCounts): string {
+  return `Architecture Canon summary: elements=${counts.elements}, interfaces=${counts.interfaces}, relationships=${counts.relationships}, flows=${counts.flows}, views=${counts.views}`;
 }
 
 function isMissingFileError(error: unknown): boolean {
@@ -145,10 +168,12 @@ export async function runArchitectureCli(args: readonly string[]): Promise<numbe
   }
 
   if (command === "validate") {
+    const counts = architectureCanonCounts(document);
     if (json) {
-      console.log(JSON.stringify({ ok: true, command: "architecture validate", file }));
+      console.log(JSON.stringify({ ok: true, command: "architecture validate", file, ...counts }));
     } else {
       console.log(`valid Architecture Canon: ${file}`);
+      console.log(architectureCanonSummary(counts));
     }
     return 0;
   }

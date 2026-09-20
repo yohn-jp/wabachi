@@ -53,7 +53,47 @@ test("validate accepts an explicit Canon file and emits JSON diagnostics", async
       ok: true,
       command: "architecture validate",
       file,
+      elements: 0,
+      interfaces: 0,
+      relationships: 0,
+      flows: 0,
+      views: 0,
     });
+  } finally {
+    output.restore();
+  }
+});
+
+test("validate preserves text confirmation and reports deterministic Canon counts", async () => {
+  const directory = await temporaryDirectory();
+  const file = path.join(directory, "architecture.json");
+  const document = createArchitectureDocument({
+    documentId: "architecture-document",
+    root: { id: "architecture" },
+    elements: [
+      { id: "orders", kind: "service" },
+      { id: "payments", kind: "service" },
+    ],
+    interfaces: [{ id: "orders-api", owner: "orders", protocol: "https" }],
+    relationships: [{ source: "orders", target: "payments", kind: "calls" }],
+    flows: [{ id: "checkout", steps: [{ interfaceId: "orders-api", operation: "create" }] }],
+    views: [
+      {
+        key: "checkout-flow",
+        kind: "dynamic",
+        scope: { include: [{ kind: "flow", id: "checkout" }] },
+        root: { kind: "element", id: "orders" },
+      },
+    ],
+  });
+  await writeFile(file, serializeCanonicalArchitectureDocument(document), "utf8");
+  const output = captureOutput();
+  try {
+    assert.equal(await runArchitectureCli(["validate", file]), 0);
+    assert.deepEqual(output.logs, [
+      `valid Architecture Canon: ${file}`,
+      "Architecture Canon summary: elements=2, interfaces=1, relationships=1, flows=1, views=1",
+    ]);
   } finally {
     output.restore();
   }
@@ -78,6 +118,11 @@ test("validate and render resolve the conventional Canon when the file is omitte
       ok: true,
       command: "architecture validate",
       file: ".wabachi/architecture.json",
+      elements: 0,
+      interfaces: 0,
+      relationships: 0,
+      flows: 0,
+      views: 0,
     });
     assert.equal(await runArchitectureCli(["render", "--out", outputRoot, "--json"]), 0);
     assert.deepEqual(JSON.parse(output.logs[1] ?? "{}"), {
