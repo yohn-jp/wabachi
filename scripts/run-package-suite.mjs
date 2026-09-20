@@ -29,7 +29,12 @@ function main() {
   }
   const packedFiles = packInfo.files.map((entry) => entry.path);
 
-  for (const requiredPath of ["docs/USAGE.md", "skills/wabachi/SKILL.md", ".codex-plugin/plugin.json"]) {
+  for (const requiredPath of [
+    "docs/USAGE.md",
+    "skills/wabachi/SKILL.md",
+    ".codex-plugin/plugin.json",
+    "dist/architecture/documentation/react-flow.js",
+  ]) {
     if (!packedFiles.includes(requiredPath)) {
       throw new Error(`required bundled asset "${requiredPath}" is not included in the packed tarball`);
     }
