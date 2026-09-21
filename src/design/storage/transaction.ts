@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import { lstat, mkdir, open, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assertRepositoryPathBoundary } from "./paths.js";
@@ -561,11 +562,14 @@ function sameLockOwner(
 async function readLockOwner(lockPath: string): Promise<{ pid: number; token: string } | undefined> {
   let contents: string;
   try {
-    const stats = await lstat(lockPath);
-    if (stats.isSymbolicLink()) return undefined;
-    contents = await readFile(lockPath, "utf8");
+    const handle = await open(lockPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    try {
+      contents = await handle.readFile("utf8");
+    } finally {
+      await handle.close();
+    }
   } catch (error) {
-    if (isErrno(error, "ENOENT")) return undefined;
+    if (isErrno(error, "ENOENT") || isErrno(error, "ELOOP")) return undefined;
     throw error;
   }
   let parsed: unknown;
