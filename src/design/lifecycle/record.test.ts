@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { digestJson, type Digest, type JsonValue } from "../digest.js";
+import type { MachineTransitionRequest } from "../contracts.js";
+import type { MachinePort } from "../ports.js";
 import {
   appendLifecycleEvent,
   createDesignChangeEvent,
   replayLifecycle,
   type DesignChangeEvent,
   type LifecycleEvidenceSnapshot,
-  type MachinePort,
-  type MachineTransitionRequest,
 } from "./record.js";
 
 const proposalDigest = digestJson({ proposal: "v1" });
