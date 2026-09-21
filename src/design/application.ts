@@ -192,7 +192,7 @@ function lifecycleFacts(facts: ResolvedFacts): DesignChangeLifecycleFacts {
   return {
     changeId: facts.change.changeId,
     changeDigest: facts.change.digest,
-    ...(facts.review === undefined ? {} : { review: facts.review }),
+    ...(facts.review === undefined ? {} : { proposalRevision: facts.review.proposalRevision, review: facts.review }),
     implementations: facts.implementations,
     ...(facts.certification === undefined ? {} : { certification: facts.certification }),
   };
@@ -234,8 +234,11 @@ export class DesignApplicationService {
       throw new DesignApplicationError("invalid-change", "amended Design Change must retain its changeId");
     }
     const current = await this.readChange(changeId);
-    const facts = await this.readFacts(current);
-    if (facts.state === "promoted") {
+    const currentLifecycle = await this.ports.lifecycle.read(changeId);
+    if (currentLifecycle !== undefined && currentLifecycle.changeDigest !== current.digest) {
+      throw new DesignApplicationError("stale-lifecycle", `lifecycle for ${changeId} is stale`);
+    }
+    if (currentLifecycle?.state === "promoted") {
       throw new DesignApplicationError("unsupported-operation", "a promoted Design Change cannot be amended");
     }
     const canon = await this.readCurrentCanon();
@@ -265,8 +268,14 @@ export class DesignApplicationService {
     const event: DesignChangeLifecycleEvent =
       evidence.decision === "approved" ? { type: "DESIGN_REVIEW_APPROVED" } : { type: "DESIGN_REVIEW_REWORK" };
     const state = this.nextState(facts, event);
+    const rework = evidence.decision !== "approved";
     const lifecycle = recordFor(
-      { change, review: evidence, implementations: facts.implementations, certification: facts.certification },
+      {
+        change,
+        review: rework ? undefined : evidence,
+        implementations: rework ? [] : facts.implementations,
+        certification: rework ? undefined : facts.certification,
+      },
       state,
     );
     // The transition is evaluated before recording evidence, so rejected input commits nothing.
@@ -374,9 +383,8 @@ export class DesignApplicationService {
   }
 
   private nextState(facts: ResolvedFacts, event: DesignChangeLifecycleEvent): DesignChangeLifecycleState {
-    const actor = createActor(
-      createDesignChangeLifecycleMachine({ ...lifecycleFacts(facts), initialState: facts.state }),
-    );
+    const input = { ...lifecycleFacts(facts), initialState: facts.state };
+    const actor = createActor(createDesignChangeLifecycleMachine(input), { input });
     actor.start();
     actor.send(event);
     const snapshot = actor.getSnapshot();

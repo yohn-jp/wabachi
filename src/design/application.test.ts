@@ -162,7 +162,7 @@ test("rejects malformed proposals before any store commit", async () => {
   const app = createDesignApplication(state.ports);
   const malformed = {
     ...state.payload,
-    target: { ...state.payload.target, targetCanonDigest: "not-a-digest" },
+    target: { ...state.payload.target, targetCanonDigest: "not-a-digest" as Digest },
   };
 
   await assert.rejects(app.create(malformed), (error: unknown) => {
