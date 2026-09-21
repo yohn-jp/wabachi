@@ -10,6 +10,12 @@ import type {
   DocumentationSection,
   DocumentationSectionKey,
 } from "./model.js";
+import type { CodeIntent } from "../canon/code-intent-contract.js";
+
+export interface DocumentationProjectionOptions {
+  /** Optional read-model Code Intent supplied by the Design Intent authority. */
+  readonly codeIntent?: readonly CodeIntent[];
+}
 
 const SECTION_GROUP_KEYS = {
   structure: ["elements", "interfaces", "relationships", "boundaries"],
@@ -22,6 +28,7 @@ const SECTION_GROUP_KEYS = {
   decisions: ["decisions"],
   references: ["references", "attachments"],
   views: ["views"],
+  codeIntent: ["codeIntents"],
 } as const satisfies Record<DocumentationSectionKey, readonly string[]>;
 
 function freezeArray<T>(values: readonly T[]): readonly T[] {
@@ -126,7 +133,21 @@ function viewEntry(view: ArchitectureDocumentV1["views"][number]): Documentation
   return createEntry(view.key, view, [view.root?.id, ...references.map((reference) => reference.id)]);
 }
 
-function createSections(document: ArchitectureDocumentV1): readonly DocumentationSection[] {
+function codeIntentEntry(
+  intent: NonNullable<ArchitectureDocumentV1["codeIntents"]>["entries"][number],
+): DocumentationEntry {
+  return createEntry(intent.id, intent, [
+    intent.id,
+    intent.ownerId,
+    ...intent.responsibilityIds,
+    ...intent.decisionIds,
+  ]);
+}
+
+function createSections(
+  document: ArchitectureDocumentV1,
+  codeIntents: readonly CodeIntent[] | undefined = document.codeIntents?.entries,
+): readonly DocumentationSection[] {
   const structure = createSection("structure", [
     createGroup(
       "elements",
@@ -225,7 +246,7 @@ function createSections(document: ArchitectureDocumentV1): readonly Documentatio
 
   const views = createSection("views", [createGroup("views", document.views.map(viewEntry))]);
 
-  return freezeArray([
+  const sections = [
     structure,
     responsibility,
     authority,
@@ -236,7 +257,13 @@ function createSections(document: ArchitectureDocumentV1): readonly Documentatio
     decisions,
     references,
     views,
-  ]);
+  ];
+
+  if (codeIntents !== undefined) {
+    sections.push(createSection("codeIntent", [createGroup("codeIntents", codeIntents.map(codeIntentEntry))]));
+  }
+
+  return freezeArray(sections);
 }
 
 function createNavigation(sections: readonly DocumentationSection[]): readonly DocumentationNavigationItem[] {
@@ -251,14 +278,18 @@ function createNavigation(sections: readonly DocumentationSection[]): readonly D
 }
 
 /** Project a validated Architecture Canon into renderer-neutral documentation data. */
-export function projectArchitectureDocument(document: ArchitectureDocumentV1): DocumentationModel {
+export function projectArchitectureDocument(
+  document: ArchitectureDocumentV1,
+  options: DocumentationProjectionOptions | readonly CodeIntent[] = {},
+): DocumentationModel {
   const validation = validateArchitectureDocument(document);
   if (!validation.valid) {
     const diagnostics = validation.diagnostics.map(({ code, path }) => `${code} at ${path}`).join(", ");
     throw new Error(`cannot project invalid Architecture Canon: ${diagnostics}`);
   }
 
-  const sections = createSections(document);
+  const codeIntents = Array.isArray(options) ? options : (options as DocumentationProjectionOptions).codeIntent;
+  const sections = createSections(document, codeIntents ?? document.codeIntents?.entries);
   return Object.freeze({
     canonVersion: document.canonVersion,
     documentId: document.documentId,

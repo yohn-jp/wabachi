@@ -20,6 +20,8 @@ import type { RepositoryMapping } from "../canon/repository-mappings.js";
 import type { ResponsibilityFact } from "../canon/responsibilities.js";
 import type { ViewSpec } from "../canon/views.js";
 import type { CanonVersion, DocumentId } from "../canon/identity.js";
+import type { CodeIntent } from "../canon/code-intent-contract.js";
+import type { DesignIntentLifecycleRecord } from "../../design/contracts.js";
 
 export const DOCUMENTATION_SECTION_ORDER = [
   "structure",
@@ -32,6 +34,7 @@ export const DOCUMENTATION_SECTION_ORDER = [
   "decisions",
   "references",
   "views",
+  "codeIntent",
 ] as const;
 
 export type DocumentationSectionKey = (typeof DOCUMENTATION_SECTION_ORDER)[number];
@@ -61,7 +64,8 @@ export type DocumentationData =
   | ArchitectureDecision
   | ArchitectureReference
   | ArchitectureReferenceAttachment
-  | ViewSpec;
+  | ViewSpec
+  | CodeIntent;
 
 export interface DocumentationEntry<TData extends DocumentationData = DocumentationData> {
   /** A deterministic projection key. It is not an additional architecture identity. */
@@ -92,4 +96,12 @@ export interface DocumentationModel {
   readonly root: DocumentationAnchor;
   readonly navigation: readonly DocumentationNavigationItem[];
   readonly sections: readonly DocumentationSection[];
+  /** Read-only Design Intent context; the current Canon remains this model's authority. */
+  readonly designIntent?: DocumentationDesignIntent;
+}
+
+/** Lifecycle-aware context attached to a current documentation projection. */
+export interface DocumentationDesignIntent {
+  readonly proposed?: DocumentationModel;
+  readonly lifecycle?: DesignIntentLifecycleRecord;
 }
