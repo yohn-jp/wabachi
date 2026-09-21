@@ -93,6 +93,20 @@ test("detects deleted paths and an unambiguous missing symbol", () => {
   );
 });
 
+test("does not treat a missing path in bare tree evidence as a deletion", () => {
+  const result = runMachineChecks({
+    document: document(),
+    evidence: {
+      repository: revision,
+      treePaths: ["src/billing.ts"],
+    },
+  });
+  assert.equal(
+    result.checks.find((check) => check.checkId === "path:service:src/service.ts:file")?.result,
+    "unresolved",
+  );
+});
+
 test("reports a forbidden dependency as mismatch and partial absence as unresolved", () => {
   const forbidden = mappedFact(
     makeFact("depends-on", { id: "service", kind: "module" }, { id: "billing", kind: "module" }, "src/service.ts"),
