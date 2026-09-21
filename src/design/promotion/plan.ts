@@ -382,7 +382,7 @@ function validateLifecycle(
   }
   if (
     certification.result !== "match" ||
-    !isUsableCertification(certification, input.requiredCheckIds, proposalTargets, target, lifecycle.implementations)
+    !isUsableCertification(certification, input.requiredCheckIds, target, lifecycle.implementations)
   ) {
     return { code: "stale-certification", detail: "certification is not a complete match for the current proposal" };
   }
@@ -421,7 +421,6 @@ function isCurrentImplementationLink(link: ImplementationLink, change: DesignCha
 function isUsableCertification(
   certification: CertificationEvidence,
   requiredCheckIds: readonly string[] | undefined,
-  proposalTargets: ReadonlySet<string>,
   target: ArchitectureDocumentV1,
   links: readonly ImplementationLink[],
 ): boolean {
@@ -444,8 +443,7 @@ function isUsableCertification(
       check.checkId.trim().length === 0 ||
       ids.has(check.checkId) ||
       check.result !== "match" ||
-      (check.targetEntryKey !== undefined &&
-        (typeof check.targetEntryKey !== "string" || !proposalTargets.has(check.targetEntryKey)))
+      (check.targetEntryKey !== undefined && typeof check.targetEntryKey !== "string")
     ) {
       return false;
     }
