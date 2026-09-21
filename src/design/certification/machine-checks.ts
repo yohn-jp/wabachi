@@ -164,11 +164,18 @@ function factSubjectMatchesMapping(
   const sourcePath = factSourcePath(fact);
   if (sourcePath !== symbol.path) return false;
   if (fact.subject.canonicalId === mapping.canonId) return true;
-  return (
-    fact.subject.canonicalId === undefined &&
-    fact.subject.nativeId === symbol.symbol &&
-    fact.subject.path === symbol.path
-  );
+  if (fact.subject.path !== symbol.path) return false;
+
+  // The TypeScript provider uses the compiler's fully-qualified symbol as the
+  // normalized subject nativeId (for example,
+  // `"/workspace/src/service".Service`). The repository mapping stores the
+  // source-level symbol name, so compare the exact terminal identity while
+  // retaining the exact mapped source path above. A canonicalId produced by
+  // correlation is not the repository mapping's canonId and must not prevent
+  // this provider-native match.
+  const separator = fact.subject.nativeId.lastIndexOf(".");
+  const providerSymbol = separator < 0 ? fact.subject.nativeId : fact.subject.nativeId.slice(separator + 1);
+  return providerSymbol === symbol.symbol;
 }
 
 function symbolCandidates(

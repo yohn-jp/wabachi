@@ -142,6 +142,57 @@ test("accepts only unambiguous defines evidence for a symbol", () => {
   );
 });
 
+test("matches the qualified TypeScript defines identity at its exact mapped path", () => {
+  const defines = makeFact(
+    "defines",
+    { id: "src/service.ts", kind: "module" },
+    { id: '"/isolated/worktree/src/service".Service', kind: "FunctionDeclaration" },
+    "src/service.ts",
+  );
+  const result = runMachineChecks({ document: document(), evidence: evidence([defines]) });
+  assert.equal(
+    result.checks.find((check) => check.checkId === "symbol:service:src/service.ts:Service")?.result,
+    "match",
+  );
+});
+
+test("does not match a qualified symbol whose defines value is from another path", () => {
+  const defines = makeFact(
+    "defines",
+    { id: "src/other.ts", kind: "module" },
+    { id: '"/isolated/worktree/src/other".Service', kind: "FunctionDeclaration" },
+    "src/other.ts",
+  );
+  const result = runMachineChecks({ document: document(), evidence: evidence([defines]) });
+  assert.equal(
+    result.checks.find((check) => check.checkId === "symbol:service:src/service.ts:Service")?.result,
+    "mismatch",
+  );
+});
+
+test("keeps ambiguous canonical candidates unresolved for a qualified symbol", () => {
+  const base = makeFact(
+    "defines",
+    { id: "src/service.ts", kind: "module" },
+    { id: '"/isolated/worktree/src/service".Service', kind: "FunctionDeclaration" },
+    "src/service.ts",
+  );
+  const ambiguous = {
+    ...base,
+    subject: {
+      ...base.subject,
+      canonicalId: undefined,
+      candidateCanonicalIds: ["service", "other"],
+      correlationStatus: "ambiguous" as const,
+    },
+  };
+  const result = runMachineChecks({ document: document(), evidence: evidence([ambiguous]) });
+  assert.equal(
+    result.checks.find((check) => check.checkId === "symbol:service:src/service.ts:Service")?.result,
+    "unresolved",
+  );
+});
+
 test("never turns ambiguous endpoint evidence into a forbidden-edge absence match", () => {
   const ambiguousBase = mappedFact(
     makeFact("depends-on", { id: "service", kind: "module" }, { id: "billing", kind: "module" }, "src/service.ts"),
