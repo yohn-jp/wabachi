@@ -238,6 +238,29 @@ function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+test("certification checks naming a Code Intent verification-obligation target are accepted", () => {
+  const value = input();
+  const codeIntentTargetKey = createSemanticEntryKey({
+    collection: "code-intent",
+    identity: ["intent-1", "obligation-1"],
+  });
+  const checks = [
+    { checkId: "canon-valid", result: "match" as const },
+    { checkId: "code-intent:intent-1:obligation-1", targetEntryKey: codeIntentTargetKey, result: "match" as const },
+  ];
+  const certification = {
+    ...value.lifecycle.certification!,
+    checkerDigest: checkerResultDigest(checks),
+    checks,
+  };
+  const result = preflightPromotion({
+    ...value,
+    lifecycle: { ...value.lifecycle, certification: certification as never },
+  });
+
+  assert.equal(result.ok, true);
+});
+
 test("promotion requires each independent certification digest binding", () => {
   const value = input();
   const fields = [
