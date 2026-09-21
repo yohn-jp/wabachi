@@ -70,7 +70,13 @@ test("only local and HTTP(S) references become links", () => {
   assert.equal(safeDesignIntentHref("current/index.html"), "current/index.html");
   assert.equal(safeDesignIntentHref("#review"), "#review");
   assert.equal(safeDesignIntentHref("https://example.test/evidence"), "https://example.test/evidence");
+  assert.equal(safeDesignIntentHref("https://example.test/%2e%2e/evidence"), "https://example.test/%2e%2e/evidence");
   assert.equal(safeDesignIntentHref("javascript:alert(1)"), undefined);
   assert.equal(safeDesignIntentHref("data:text/html,unsafe"), undefined);
   assert.equal(safeDesignIntentHref("//evil.test/path"), undefined);
+  assert.equal(safeDesignIntentHref("/outside/index.html"), undefined);
+  assert.equal(safeDesignIntentHref("../outside/index.html"), undefined);
+  assert.equal(safeDesignIntentHref("current/../outside/index.html"), undefined);
+  assert.equal(safeDesignIntentHref("%2e%2e/outside/index.html"), undefined);
+  assert.equal(safeDesignIntentHref("%252e%252e/outside/index.html"), undefined);
 });

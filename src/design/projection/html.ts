@@ -32,6 +32,30 @@ export function safeDesignIntentHref(value: string): string | undefined {
     } catch {
       return undefined;
     }
+    return value;
+  }
+
+  if (value.startsWith("/")) return undefined;
+  let decoded = value;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    let next: string;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      return undefined;
+    }
+    if (next === decoded) break;
+    decoded = next;
+  }
+  if (
+    decoded.startsWith("/") ||
+    /[\u0000-\u001f\u007f\\]/u.test(decoded) ||
+    decoded
+      .split(/[?#]/u, 1)[0]
+      ?.split("/")
+      .some((segment) => segment === "..") === true
+  ) {
+    return undefined;
   }
 
   return value;
