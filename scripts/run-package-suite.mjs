@@ -55,6 +55,9 @@ function validateNestedDesignTestDiscovery() {
   if (discovered.length === 0) {
     throw new Error("nested src/design test discovery found no TypeScript test files");
   }
+  if (!discovered.includes("change/canon-adapter.test.ts")) {
+    throw new Error("Canon adapter contract test is not included in nested src/design test discovery");
+  }
 
   console.log(`nested src/design test discovery verified: ${discovered.length} file(s).`);
 }
