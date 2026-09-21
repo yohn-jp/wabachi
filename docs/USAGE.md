@@ -98,6 +98,46 @@ then render it into a retained site. The matching live playbook is
 `wabachi skill architecture-documentation`. Passing an explicit Canon path to
 either command preserves the same workflow for another file.
 
+## Design Intent lifecycle
+
+The installed Design workflow stores records beneath `.wabachi/changes/` and
+resolves the current Canon from `.wabachi/architecture.json`. Discover the
+exact command contract with `wabachi design --help=json`; its supported leaves
+are create, show, diff, status, validate, amend, submit, review, start, link,
+certify, rework, promote, recover, and render.
+
+Author and inspect a draft, then submit it for review:
+
+```bash
+wabachi design create change-id ./target-canon.json --json
+wabachi design show change-id --json
+wabachi design diff change-id --json
+wabachi design status change-id --json
+wabachi design validate change-id --json
+wabachi design submit change-id --json
+wabachi design review change-id --input ./docs/examples/design-review.json --json
+wabachi design start change-id --json
+```
+
+After implementation evidence is bound to the exact proposal, record the
+Implementation link and provide raw certification inputs:
+
+```bash
+wabachi design link change-id --input ./docs/examples/implementation-review.json --json
+wabachi design certify change-id --input ./certification-input.json --json
+wabachi design promote change-id --json
+wabachi design render change-id --out ./artifacts/design-site --json
+```
+
+`certify` derives machine checks and the final result; callers must not supply
+a completed `CertificationEvidence` or assert `result: "match"`. The examples
+in `docs/examples/` show transport shapes with placeholder bindings. Replace
+every digest and immutable revision with values from the current repository.
+They are documentation fixtures, not historical approval or dogfood evidence.
+Rejected or stale transitions fail closed; inspect JSON diagnostics and use
+`wabachi design rework` or the explicitly selected `wabachi design recover`
+operation when the lifecycle contract permits it.
+
 ## Common failures and recovery
 
 - If a repository cannot be resolved, confirm the path or remote and retry

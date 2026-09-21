@@ -127,3 +127,44 @@ test("leaves cross-section reference resolution to a later validation boundary",
     }),
   );
 });
+
+test("composes Code Intent as an optional Canon section and registers its identities", () => {
+  const document = createArchitectureDocument({
+    documentId: "document",
+    root: { id: "architecture" },
+    elements: [{ id: "orders", kind: "service" }],
+    repositoryMappings: [{ canonId: "intent", paths: ["src/orders.ts"] }],
+    codeIntents: {
+      schemaVersion: 1,
+      entries: [
+        {
+          id: "intent",
+          ownerId: "orders",
+          responsibilityIds: [],
+          decisionIds: [],
+          invariants: [{ id: "invariant", text: "orders remain deterministic" }],
+          prohibitions: [],
+          verificationObligations: [],
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(document.codeIntents, {
+    schemaVersion: 1,
+    entries: [
+      {
+        id: "intent",
+        ownerId: "orders",
+        responsibilityIds: [],
+        decisionIds: [],
+        invariants: [{ id: "invariant", text: "orders remain deterministic" }],
+        prohibitions: [],
+        verificationObligations: [],
+      },
+    ],
+  });
+  assert.ok(
+    document.globalIdentityRegistry.entries.some((entry) => entry.id === "intent" && entry.namespace === "code-intent"),
+  );
+});

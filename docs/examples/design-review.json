@@ -1,0 +1,16 @@
+{
+  "reviewId": "example-design-review",
+  "changeId": "example-design-change",
+  "proposalDigest": "3333333333333333333333333333333333333333333333333333333333333333",
+  "proposalRevision": "0000000000000000000000000000000000000000",
+  "decision": "approved",
+  "actor": "replace-with-reviewer",
+  "reason": "Documentation-only test fixture; replace this binding with a real immutable review reason.",
+  "timestamp": "2026-01-01T00:00:00.000Z",
+  "evidence": [
+    {
+      "provider": "replace-with-provider",
+      "reference": "replace-with-immutable-evidence-reference"
+    }
+  ]
+}

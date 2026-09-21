@@ -8,6 +8,7 @@ import { createScipTypescriptProvider } from "./runtime/scipProvider.js";
 import { createTypeScriptProvider } from "./runtime/typescriptProvider.js";
 import { runProviderMatrix } from "./runtime/workflow.js";
 import { runArchitectureCli } from "./architecture/cli.js";
+import { runDesignCli } from "./design/cli.js";
 import { commandUsage, parseHelpRequest, projectCommandHelp, renderCommandHelp } from "./command-contract.js";
 import {
   boundText,
@@ -54,6 +55,10 @@ export async function runCli(argv: string[]): Promise<number> {
 
   if (command === "architecture") {
     return runArchitectureCli(argv.slice(1));
+  }
+
+  if (command === "design") {
+    return runDesignCli(argv.slice(1));
   }
 
   if (command === "skill") {

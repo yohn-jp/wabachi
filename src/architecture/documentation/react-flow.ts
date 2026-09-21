@@ -135,6 +135,19 @@ const WABACHI_REACT_FLOW_CSS = `.wabachi-react-flow-diagrams {
   background: #fff7e6;
 }
 
+.wabachi-react-flow-node[data-delta-state="added"] {
+  border-color: #188038;
+}
+
+.wabachi-react-flow-node[data-delta-state="removed"] {
+  border-color: #c5221f;
+  border-style: dashed;
+}
+
+.wabachi-react-flow-node[data-delta-state="modified"] {
+  border-color: #b06000;
+}
+
 .wabachi-react-flow-node > .react-flow__handle {
   opacity: 0;
 }
@@ -152,6 +165,19 @@ const WABACHI_REACT_FLOW_CSS = `.wabachi-react-flow-diagrams {
 .wabachi-react-flow-edge .react-flow__edge-textbg {
   fill: var(--wabachi-flow-canvas);
   opacity: 0.95;
+}
+
+.wabachi-react-flow-edge--delta-added .react-flow__edge-path {
+  stroke: #188038;
+}
+
+.wabachi-react-flow-edge--delta-removed .react-flow__edge-path {
+  stroke: #c5221f;
+  stroke-dasharray: 6 4;
+}
+
+.wabachi-react-flow-edge--delta-modified .react-flow__edge-path {
+  stroke: #b06000;
 }
 `;
 
@@ -393,10 +419,20 @@ type ArchitectureFlowNode = Node<ArchitectureFlowNodeData, "architecture">;
 type ArchitectureFlowEdgeData = ReactFlowEdge["data"] & Record<string, unknown>;
 type ArchitectureFlowEdge = Edge<ArchitectureFlowEdgeData, "routed">;
 
+type ReactFlowDeltaState = "unchanged" | "added" | "removed" | "modified";
+
+function readDeltaState(value: unknown): ReactFlowDeltaState | undefined {
+  return value === "unchanged" || value === "added" || value === "removed" || value === "modified" ? value : undefined;
+}
+
 function ArchitectureNode({ data, parentId }: NodeProps<ArchitectureFlowNode>): React.ReactElement {
-  const className = data.isParent
-    ? "wabachi-react-flow-node wabachi-react-flow-node--parent"
-    : "wabachi-react-flow-node";
+  const deltaState = readDeltaState(data.deltaState);
+  const className = [
+    data.isParent ? "wabachi-react-flow-node wabachi-react-flow-node--parent" : "wabachi-react-flow-node",
+    deltaState === undefined ? undefined : `wabachi-react-flow-node--delta-${deltaState}`,
+  ]
+    .filter((value): value is string => value !== undefined)
+    .join(" ");
   return React.createElement(
     React.Fragment,
     null,
@@ -408,6 +444,7 @@ function ArchitectureNode({ data, parentId }: NodeProps<ArchitectureFlowNode>): 
         "data-canon-id": data.canonId,
         "data-view-key": data.viewKey,
         "data-kind": data.kind,
+        ...(deltaState === undefined ? {} : { "data-delta-state": deltaState }),
         ...(parentId === undefined ? {} : { "data-parent-id": parentId }),
         role: "group",
       },
@@ -422,6 +459,7 @@ function RoutedEdge({ id, data, label, markerEnd }: EdgeProps<ArchitectureFlowEd
     throw new ReactFlowStaticRenderError(`React Flow edge ${id} has no projection data`);
   }
   const routed = edgePath({ id, data });
+  const deltaState = readDeltaState(data.deltaState);
   return React.createElement(
     "g",
     {
@@ -429,6 +467,7 @@ function RoutedEdge({ id, data, label, markerEnd }: EdgeProps<ArchitectureFlowEd
       "data-canon-source-id": data.canonSourceId,
       "data-canon-target-id": data.canonTargetId,
       ...(data.canonRelationshipId === undefined ? {} : { "data-canon-relationship-id": data.canonRelationshipId }),
+      ...(deltaState === undefined ? {} : { "data-delta-state": deltaState }),
       "data-section-count": String(data.sections.length),
     },
     React.createElement(BaseEdge, {
@@ -438,7 +477,12 @@ function RoutedEdge({ id, data, label, markerEnd }: EdgeProps<ArchitectureFlowEd
       labelX: routed.labelPoint.x,
       labelY: routed.labelPoint.y,
       markerEnd,
-      className: "wabachi-react-flow-edge",
+      className: [
+        "wabachi-react-flow-edge",
+        deltaState === undefined ? undefined : `wabachi-react-flow-edge--delta-${deltaState}`,
+      ]
+        .filter((value): value is string => value !== undefined)
+        .join(" "),
     }),
   );
 }

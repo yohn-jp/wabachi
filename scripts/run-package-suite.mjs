@@ -45,11 +45,56 @@ function validateWorkingSetQualityCorpus() {
   }
 }
 
+function validateNestedDesignTestDiscovery() {
+  const designRoot = path.join(repoRoot, "src", "design");
+  const discovered = fs
+    .readdirSync(designRoot, { recursive: true })
+    .filter((entry) => typeof entry === "string" && entry.endsWith(".test.ts"))
+    .sort();
+
+  if (discovered.length === 0) {
+    throw new Error("nested src/design test discovery found no TypeScript test files");
+  }
+  if (!discovered.includes("change/canon-adapter.test.ts")) {
+    throw new Error("Canon adapter contract test is not included in nested src/design test discovery");
+  }
+
+  console.log(`nested src/design test discovery verified: ${discovered.length} file(s).`);
+}
+
+function validateDesignCliContract() {
+  const result = run(process.execPath, ["dist/index.js", "design", "--help=json"]);
+  const projection = JSON.parse(result.stdout);
+  const required = [
+    "design.create",
+    "design.show",
+    "design.diff",
+    "design.status",
+    "design.validate",
+    "design.amend",
+    "design.submit",
+    "design.review",
+    "design.start",
+    "design.link",
+    "design.certify",
+    "design.rework",
+    "design.promote",
+    "design.recover",
+    "design.render",
+  ];
+  const actual = new Set((projection.commands ?? []).map((entry) => entry.id));
+  for (const commandId of required) {
+    if (!actual.has(commandId)) throw new Error(`Design CLI contract is missing ${commandId}`);
+  }
+}
+
 function main() {
   const distEntry = path.join(repoRoot, "dist", "index.js");
   if (!fs.existsSync(distEntry)) throw new Error("dist is missing; run pnpm run build before the package suite");
 
   validateWorkingSetQualityCorpus();
+  validateNestedDesignTestDiscovery();
+  validateDesignCliContract();
 
   const packResult = run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"]);
   const packReport = JSON.parse(packResult.stdout);
@@ -63,11 +108,17 @@ function main() {
   for (const requiredPath of [
     "docs/USAGE.md",
     "docs/examples/minimal-canon.json",
+    "docs/examples/design-change.json",
+    "docs/examples/design-review.json",
+    "docs/examples/implementation-review.json",
     "skills/wabachi/SKILL.md",
     ".codex-plugin/plugin.json",
     "dist/architecture/documentation/site.js",
     "dist/architecture/documentation/react-flow.js",
     "dist/architecture/projection/react-flow.js",
+    "dist/design/projection/document.js",
+    "dist/design/projection/html.js",
+    "dist/design/projection/site.js",
   ]) {
     if (!packedFiles.includes(requiredPath)) {
       throw new Error(`required bundled asset "${requiredPath}" is not included in the packed tarball`);
@@ -91,6 +142,7 @@ function main() {
   console.log(`package contents verified: ${packedFiles.length} file(s), all bin targets present and executable.`);
 
   run(process.execPath, ["scripts/smoke-test.mjs"], { stdio: "inherit" });
+  run(process.execPath, ["scripts/certify-design-dogfood.mjs"], { stdio: "inherit" });
 }
 
 main();

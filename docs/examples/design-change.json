@@ -1,0 +1,25 @@
+{
+  "contractVersion": 1,
+  "changeId": "example-design-change",
+  "base": {
+    "repositoryRevision": "0000000000000000000000000000000000000000",
+    "canonVersion": 1,
+    "canonDigest": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "target": {
+    "canonVersion": 1,
+    "operations": [
+      {
+        "kind": "added",
+        "entryKey": "[\"element\",\"example-service\"]",
+        "value": {
+          "id": "example-service",
+          "kind": "service",
+          "parentId": "architecture"
+        }
+      }
+    ],
+    "targetCanonDigest": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "digest": "3333333333333333333333333333333333333333333333333333333333333333"
+}

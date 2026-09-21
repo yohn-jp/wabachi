@@ -19,6 +19,7 @@ test("skill scenarios are deterministic and cover the initial intents", () => {
       "provider-matrix",
       "validate-architecture-canon",
       "render-architecture-canon",
+      "design-intent-lifecycle",
       "architecture-documentation",
     ],
   );

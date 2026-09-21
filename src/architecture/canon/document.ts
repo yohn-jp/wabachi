@@ -37,6 +37,20 @@ import {
   type ArchitectureDecisionsInput,
 } from "./decisions.js";
 import { normalizeViews, type ViewInput, type ViewSpec } from "./views.js";
+import { createCodeIntentContract, type CodeIntentContractInput, type CodeIntentInput } from "./code-intent.js";
+import type { CodeIntent } from "./code-intent-contract.js";
+
+export const CODE_INTENT_SCHEMA_VERSION = 1 as const;
+
+export interface CodeIntentSectionInput extends CodeIntentContractInput {
+  readonly schemaVersion: typeof CODE_INTENT_SCHEMA_VERSION;
+  readonly entries: readonly CodeIntentInput[];
+}
+
+export interface CodeIntentSection {
+  readonly schemaVersion: typeof CODE_INTENT_SCHEMA_VERSION;
+  readonly entries: readonly CodeIntent[];
+}
 
 /** Canon v1 sections are emitted in the order established by leaf implementation order. */
 export const CANON_SECTION_ORDER = [
@@ -71,10 +85,19 @@ export interface ArchitectureDocumentInput {
   readonly repositoryMappings?: readonly RepositoryMappingInput[];
   readonly decisions?: ArchitectureDecisionsInput;
   readonly views?: readonly ViewInput[];
+  readonly codeIntents?: CodeIntentSectionInput;
 }
 
 export type GlobalIdentityNamespace =
-  "architecture" | "element" | "interface" | "responsibility" | "boundary" | "flow" | "decision" | "reference";
+  | "architecture"
+  | "element"
+  | "interface"
+  | "responsibility"
+  | "boundary"
+  | "flow"
+  | "decision"
+  | "reference"
+  | "code-intent";
 
 export interface GlobalIdentityEntry {
   readonly id: string;
@@ -102,6 +125,7 @@ export interface ArchitectureDocumentV1 {
   readonly repositoryMappings: readonly RepositoryMapping[];
   readonly decisions: ArchitectureDecisions;
   readonly views: readonly ViewSpec[];
+  readonly codeIntents?: CodeIntentSection;
   readonly globalIdentityRegistry: GlobalIdentityRegistry;
 }
 
@@ -127,6 +151,7 @@ function createGlobalIdentityRegistry(document: {
   readonly boundaries: readonly Boundary[];
   readonly flows: readonly Flow[];
   readonly decisions: ArchitectureDecisions;
+  readonly codeIntents?: CodeIntentSection;
 }): GlobalIdentityRegistry {
   const entries: GlobalIdentityEntry[] = [
     { id: document.root.id, namespace: "architecture" },
@@ -137,6 +162,7 @@ function createGlobalIdentityRegistry(document: {
     ...document.flows.map(({ id }) => ({ id, namespace: "flow" as const })),
     ...document.decisions.decisions.map(({ id }) => ({ id, namespace: "decision" as const })),
     ...document.decisions.references.map(({ id }) => ({ id, namespace: "reference" as const })),
+    ...(document.codeIntents?.entries.map(({ id }) => ({ id, namespace: "code-intent" as const })) ?? []),
   ];
 
   entries.sort(compareIdentityEntries);
@@ -171,6 +197,18 @@ export function createArchitectureDocument(input: ArchitectureDocumentInput): Ar
   const repositoryMappings = createRepositoryMappings(input.repositoryMappings ?? []);
   const decisions = createArchitectureDecisions(input.decisions ?? {});
   const views = normalizeViews(input.views ?? []);
+  const codeIntents =
+    input.codeIntents === undefined
+      ? undefined
+      : (() => {
+          if (input.codeIntents.schemaVersion !== CODE_INTENT_SCHEMA_VERSION) {
+            throw new TypeError(`unsupported Code Intent schemaVersion: ${String(input.codeIntents.schemaVersion)}`);
+          }
+          return Object.freeze({
+            schemaVersion: CODE_INTENT_SCHEMA_VERSION,
+            entries: createCodeIntentContract({ entries: input.codeIntents.entries }).entries,
+          });
+        })();
 
   const document = {
     canonVersion: CANON_VERSION,
@@ -188,6 +226,7 @@ export function createArchitectureDocument(input: ArchitectureDocumentInput): Ar
     repositoryMappings,
     decisions,
     views,
+    ...(codeIntents === undefined ? {} : { codeIntents }),
   } satisfies Omit<ArchitectureDocumentV1, "globalIdentityRegistry">;
 
   return Object.freeze({

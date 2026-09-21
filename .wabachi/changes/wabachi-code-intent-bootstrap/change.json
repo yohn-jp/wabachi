@@ -1,0 +1,72 @@
+{
+  "contractVersion": 1,
+  "changeId": "wabachi-code-intent-bootstrap",
+  "base": {
+    "repositoryRevision": "0d7d972663429c756a48382445368db96bfec914",
+    "canonVersion": 1,
+    "canonDigest": "d67448583031ad51f1365527ba62dfd949c6bcd8c55e23b09677c0a80155feb6"
+  },
+  "target": {
+    "canonVersion": 1,
+    "operations": [
+      {
+        "kind": "modified",
+        "entryKey": "[\"code-intent\",\"create-architecture-document-intent\"]",
+        "before": {
+          "decisionIds": ["authority-boundary-decision"],
+          "id": "create-architecture-document-intent",
+          "invariants": [
+            {
+              "id": "canon-document-composition",
+              "text": "createArchitectureDocument preserves every declared Canon section and derives identity ownership"
+            }
+          ],
+          "ownerId": "canon-service",
+          "prohibitions": [
+            {
+              "id": "canon-document-no-projection-authority",
+              "text": "Generated projections must not become Canon authority"
+            }
+          ],
+          "responsibilityIds": ["canon-authority-responsibility"],
+          "verificationObligations": [
+            {
+              "id": "create-architecture-document-symbol",
+              "mode": "machine",
+              "predicate": "defines",
+              "statementId": "canon-document-composition"
+            }
+          ]
+        },
+        "after": {
+          "decisionIds": ["authority-boundary-decision"],
+          "id": "create-architecture-document-intent",
+          "invariants": [
+            {
+              "id": "canon-document-composition",
+              "text": "createArchitectureDocument preserves declared Canon sections, identity ownership, and source intent"
+            }
+          ],
+          "ownerId": "canon-service",
+          "prohibitions": [
+            {
+              "id": "canon-document-no-projection-authority",
+              "text": "Generated projections must not become Canon authority"
+            }
+          ],
+          "responsibilityIds": ["canon-authority-responsibility"],
+          "verificationObligations": [
+            {
+              "id": "create-architecture-document-symbol",
+              "mode": "machine",
+              "predicate": "defines",
+              "statementId": "canon-document-composition"
+            }
+          ]
+        }
+      }
+    ],
+    "targetCanonDigest": "42f3eb7f6f1447f45814654b1b8f673959a4f890f6b05eae4a69645435d704d0"
+  },
+  "digest": "96fc21bcf24519976eefa7a59f9440741d54916885b5ccaac321bd265dcbf321"
+}

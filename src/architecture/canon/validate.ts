@@ -1,4 +1,5 @@
 import type { ArchitectureDocumentV1, GlobalIdentityNamespace, GlobalIdentityEntry } from "./document.js";
+import { validateCodeIntentContract } from "./code-intent-validation.js";
 
 const REGISTRY_NAMESPACES = [
   "architecture",
@@ -9,6 +10,7 @@ const REGISTRY_NAMESPACES = [
   "flow",
   "decision",
   "reference",
+  "code-intent",
 ] as const satisfies readonly GlobalIdentityNamespace[];
 
 const TARGET_NAMESPACES = [
@@ -19,6 +21,7 @@ const TARGET_NAMESPACES = [
   "boundary",
   "flow",
   "decision",
+  "code-intent",
 ] as const satisfies readonly GlobalIdentityNamespace[];
 
 export const ARCHITECTURE_DIAGNOSTIC_CODES = [
@@ -43,6 +46,11 @@ export const ARCHITECTURE_DIAGNOSTIC_CODES = [
   "invalid-supersession",
   "invalid-view-reference",
   "invalid-view-root",
+  "invalid-code-intent",
+  "unknown-code-intent-owner",
+  "unknown-code-intent-responsibility",
+  "unknown-code-intent-decision",
+  "unknown-code-intent-source-mapping",
 ] as const;
 
 export type ArchitectureDiagnosticCode = (typeof ARCHITECTURE_DIAGNOSTIC_CODES)[number];
@@ -70,6 +78,7 @@ interface CanonIndex {
   readonly flowIds: ReadonlySet<string>;
   readonly decisionIds: ReadonlySet<string>;
   readonly referenceIds: ReadonlySet<string>;
+  readonly codeIntentIds: ReadonlySet<string>;
   readonly runtimeEnvironmentIds: ReadonlySet<string>;
   readonly deploymentNodeIds: ReadonlySet<string>;
   readonly deploymentInstanceIds: ReadonlySet<string>;
@@ -110,6 +119,7 @@ function expectedRegistry(document: ArchitectureDocumentV1): ReadonlyMap<string,
   for (const flow of document.flows) expected.set(flow.id, "flow");
   for (const decision of document.decisions.decisions) expected.set(decision.id, "decision");
   for (const reference of document.decisions.references) expected.set(reference.id, "reference");
+  for (const intent of document.codeIntents?.entries ?? []) expected.set(intent.id, "code-intent");
   return expected;
 }
 
@@ -173,6 +183,7 @@ function createIndex(document: ArchitectureDocumentV1, registry: ReadonlyMap<str
     flowIds: setOf(document.flows, (flow) => flow.id),
     decisionIds: setOf(document.decisions.decisions, (decision) => decision.id),
     referenceIds: setOf(document.decisions.references, (reference) => reference.id),
+    codeIntentIds: setOf(document.codeIntents?.entries ?? [], (intent) => intent.id),
     runtimeEnvironmentIds: setOf(document.deployment.runtimeEnvironments, (environment) => environment.id),
     deploymentNodeIds: setOf(document.deployment.deploymentNodes, (node) => node.id),
     deploymentInstanceIds: setOf(document.deployment.deploymentInstances, (instance) => instance.id),
@@ -207,6 +218,8 @@ function sectionIds(index: CanonIndex, namespace: GlobalIdentityNamespace): Read
       return index.decisionIds;
     case "reference":
       return index.referenceIds;
+    case "code-intent":
+      return index.codeIntentIds;
   }
 }
 
@@ -605,6 +618,14 @@ function validateRepositoryMappings(
   }
 }
 
+function validateCodeIntents(document: ArchitectureDocumentV1, diagnostics: DiagnosticCollector): void {
+  if (document.codeIntents === undefined) return;
+  const result = validateCodeIntentContract(document.codeIntents, document);
+  for (const diagnostic of result.diagnostics) {
+    diagnostics.add(diagnostic.code, `codeIntents.${diagnostic.path}`, diagnostic.message);
+  }
+}
+
 function validateDecisions(
   document: ArchitectureDocumentV1,
   index: CanonIndex,
@@ -801,6 +822,7 @@ export function validateArchitectureDocument(document: ArchitectureDocumentV1): 
   validateFlows(document, index, diagnostics);
   validateDeployment(document, index, diagnostics);
   validateRepositoryMappings(document, index, diagnostics);
+  validateCodeIntents(document, diagnostics);
   validateDecisions(document, index, diagnostics);
   validateViews(document, index, diagnostics);
 

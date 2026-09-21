@@ -37,3 +37,28 @@ renderer. The default render path does not require Java, Docker, Chromium,
 Structurizr, CDN, or network access.
 
 Use `--json` on `skill` or help when a machine-readable projection is needed.
+
+For a Design Intent lifecycle, resolve the command contract with
+`wabachi design --help=json`, then use the implemented leaves in order:
+
+```bash
+wabachi design create <change-id> <target-canon>
+wabachi design show <change-id>
+wabachi design diff <change-id>
+wabachi design status <change-id>
+wabachi design validate <change-id>
+wabachi design submit <change-id>
+wabachi design review <change-id> --input <review.json>
+wabachi design start <change-id>
+wabachi design link <change-id> --input <implementation.json>
+wabachi design certify <change-id> --input <certification-input.json>
+wabachi design rework <change-id>
+wabachi design promote <change-id>
+wabachi design recover [<change-id>]
+wabachi design render <change-id> --out <dir>
+```
+
+Design review, linkage, certification, and promotion are bound to immutable
+proposal and repository evidence. Certification input carries raw evidence;
+the production pipeline derives the final result. Do not turn bundled
+examples into fabricated approvals or dogfood evidence.

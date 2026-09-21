@@ -11,7 +11,7 @@ export const COMMAND_CONTRACT_ID = `urn:wabachi:command-contract:${COMMAND_CONTR
 export const CLI_NAME = "wabachi" as const;
 export const DEFAULT_ARCHITECTURE_CANON_PATH = ".wabachi/architecture.json" as const;
 
-export type CommandDomain = "root" | "run" | "matrix" | "architecture" | "skill";
+export type CommandDomain = "root" | "run" | "matrix" | "architecture" | "design" | "skill";
 export type OptionValueType = "boolean" | "string";
 export type OptionArity = "none" | "required" | "optional";
 export type CommandId =
@@ -23,9 +23,26 @@ export type CommandId =
   | "architecture.example"
   | "architecture.validate"
   | "architecture.render"
+  | "design.help"
+  | "design.create"
+  | "design.show"
+  | "design.diff"
+  | "design.status"
+  | "design.validate"
+  | "design.amend"
+  | "design.submit"
+  | "design.review"
+  | "design.start"
+  | "design.link"
+  | "design.certify"
+  | "design.rework"
+  | "design.promote"
+  | "design.recover"
+  | "design.render"
   | "skill.index"
   | "skill.scenario";
-export type OptionId = "help" | "version" | "json" | "revision" | "out" | "config";
+export type OptionId =
+  "help" | "version" | "json" | "revision" | "out" | "config" | "changeId" | "section" | "input" | "force";
 
 export interface CommandOptionDefinition {
   readonly id: OptionId;
@@ -94,6 +111,10 @@ export const COMMAND_OPTIONS: Readonly<Record<OptionId, CommandOptionDefinition>
     "JSON workflow configuration for the provider matrix.",
     "path",
   ),
+  changeId: option("changeId", ["--change-id"], "string", "required", "Design Change identifier.", "id"),
+  section: option("section", ["--section"], "string", "required", "Design Canon section to project.", "section"),
+  input: option("input", ["--input"], "string", "required", "JSON input file for the Design operation.", "path"),
+  force: option("force", ["--force"], "boolean", "none", "Take over an explicitly requested recovery."),
 };
 
 const command = (
@@ -118,7 +139,7 @@ const command = (
   ...(requiredOptionIds === undefined ? {} : { requiredOptionIds }),
 });
 
-export const COMMANDS: readonly CommandDefinition[] = [
+const UNSORTED_COMMANDS: readonly CommandDefinition[] = [
   command(
     "root.help",
     "root",
@@ -128,6 +149,169 @@ export const COMMANDS: readonly CommandDefinition[] = [
     ["help"],
     ["wabachi --help", "wabachi --help=full"],
     "[command]",
+  ),
+  command(
+    "design.help",
+    "design",
+    "help",
+    ["design"],
+    "Discover the production Design Intent lifecycle commands.",
+    ["help", "json"],
+    ["wabachi design --help", "wabachi design --help=json"],
+  ),
+  command(
+    "design.create",
+    "design",
+    "create",
+    ["design", "create"],
+    "Author and persist a Design Change draft from a target Canon.",
+    ["help", "json", "input"],
+    ["wabachi design create <change-id> <canon>", "wabachi design create <change-id> --input <canon>"],
+    "<change-id> [<canon>]",
+  ),
+  command(
+    "design.show",
+    "design",
+    "show",
+    ["design", "show"],
+    "Show the current and proposed Canon for a Design Change.",
+    ["help", "json", "changeId", "section"],
+    ["wabachi design show <change-id>"],
+    "<change-id>",
+  ),
+  command(
+    "design.diff",
+    "design",
+    "diff",
+    ["design", "diff"],
+    "Show semantic operations for a Design Change.",
+    ["help", "json", "changeId", "section"],
+    ["wabachi design diff <change-id>"],
+    "<change-id>",
+  ),
+  command(
+    "design.status",
+    "design",
+    "status",
+    ["design", "status"],
+    "Show lifecycle and evidence status for a Design Change.",
+    ["help", "json", "changeId"],
+    ["wabachi design status <change-id>"],
+    "<change-id>",
+  ),
+  command(
+    "design.validate",
+    "design",
+    "validate",
+    ["design", "validate"],
+    "Validate a Design Change against its bound Canon.",
+    ["help", "json", "changeId"],
+    ["wabachi design validate <change-id>"],
+    "<change-id>",
+  ),
+  command(
+    "design.amend",
+    "design",
+    "amend",
+    ["design", "amend"],
+    "Amend a Design Change from a target Canon.",
+    ["help", "json", "input"],
+    ["wabachi design amend <change-id> <canon>"],
+    "<change-id> [<canon>]",
+  ),
+  command(
+    "design.submit",
+    "design",
+    "submit",
+    ["design", "submit"],
+    "Submit a Design Change for design review.",
+    ["help", "json"],
+    ["wabachi design submit <change-id>"],
+    "<change-id>",
+  ),
+  command(
+    "design.review",
+    "design",
+    "review",
+    ["design", "review"],
+    "Record immutable design review evidence.",
+    ["help", "json", "input"],
+    ["wabachi design review <change-id> --input <path>"],
+    "<change-id>",
+    ["input"],
+  ),
+  command(
+    "design.start",
+    "design",
+    "start",
+    ["design", "start"],
+    "Start implementation after current approval.",
+    ["help", "json"],
+    ["wabachi design start <change-id>"],
+    "<change-id>",
+  ),
+  command(
+    "design.link",
+    "design",
+    "link",
+    ["design", "link"],
+    "Record an exact-proposal Implementation link.",
+    ["help", "json", "input"],
+    ["wabachi design link <change-id> --input <path>"],
+    "<change-id>",
+    ["input"],
+  ),
+  command(
+    "design.certify",
+    "design",
+    "certify",
+    ["design", "certify"],
+    "Derive production certification from admitted evidence.",
+    ["help", "json", "input"],
+    ["wabachi design certify <change-id> --input <path>"],
+    "<change-id>",
+    ["input"],
+  ),
+  command(
+    "design.rework",
+    "design",
+    "rework",
+    ["design", "rework"],
+    "Request lifecycle rework through the review service.",
+    ["help", "json"],
+    ["wabachi design rework <change-id>"],
+    "<change-id>",
+  ),
+  command(
+    "design.promote",
+    "design",
+    "promote",
+    ["design", "promote"],
+    "Promote an exactly certified Design Change.",
+    ["help", "json"],
+    ["wabachi design promote <change-id>"],
+    "<change-id>",
+  ),
+  command(
+    "design.recover",
+    "design",
+    "recover",
+    ["design", "recover"],
+    "Recover one explicitly selected pending transaction.",
+    ["help", "json", "force"],
+    ["wabachi design recover [<change-id>]"],
+    "[<change-id>]",
+  ),
+  command(
+    "design.render",
+    "design",
+    "render",
+    ["design", "render"],
+    "Render current and proposed Design Canons as an offline site.",
+    ["help", "json", "out"],
+    ["wabachi design render <change-id> --out <dir>"],
+    "<change-id>",
+    ["out"],
   ),
   command(
     "root.version",
@@ -219,6 +403,41 @@ export const COMMANDS: readonly CommandDefinition[] = [
     "<scenario>",
   ),
 ];
+
+const COMMAND_ORDER: readonly CommandId[] = [
+  "root.help",
+  "root.version",
+  "run.execute",
+  "matrix.execute",
+  "architecture.help",
+  "architecture.example",
+  "architecture.validate",
+  "architecture.render",
+  "design.help",
+  "design.create",
+  "design.show",
+  "design.diff",
+  "design.status",
+  "design.validate",
+  "design.amend",
+  "design.submit",
+  "design.review",
+  "design.start",
+  "design.link",
+  "design.certify",
+  "design.rework",
+  "design.promote",
+  "design.recover",
+  "design.render",
+  "skill.index",
+  "skill.scenario",
+];
+
+export const COMMANDS: readonly CommandDefinition[] = COMMAND_ORDER.map((id) => {
+  const definition = UNSORTED_COMMANDS.find((entry) => entry.id === id);
+  if (definition === undefined) throw new Error(`Command contract is missing ${id}`);
+  return definition;
+});
 
 const commandsById = new Map(COMMANDS.map((entry) => [entry.id, entry]));
 const optionsByAlias = new Map<string, CommandOptionDefinition>();
@@ -342,14 +561,21 @@ export function projectCommandHelp(
   if (commandDefinition === undefined) return undefined;
 
   const isRoot = commandDefinition.id === "root.help";
-  const isDomain = commandDefinition.id === "architecture.help" || commandDefinition.id === "skill.index";
+  const isDomain =
+    commandDefinition.id === "architecture.help" ||
+    commandDefinition.id === "design.help" ||
+    commandDefinition.id === "skill.index";
   const children = isRoot
     ? COMMANDS.filter((entry) =>
-        ["root.version", "run.execute", "matrix.execute", "architecture.help", "skill.index"].includes(entry.id),
+        ["root.version", "run.execute", "matrix.execute", "architecture.help", "design.help", "skill.index"].includes(
+          entry.id,
+        ),
       )
-    : isDomain
-      ? COMMANDS.filter((entry) => entry.domain === commandDefinition.domain && entry.id !== commandDefinition.id)
-      : [];
+    : commandDefinition.domain === "design" && commandDefinition.id === "design.help"
+      ? COMMANDS.filter((entry) => entry.domain === "design" && entry.id !== "design.help")
+      : isDomain
+        ? COMMANDS.filter((entry) => entry.domain === commandDefinition.domain && entry.id !== commandDefinition.id)
+        : [];
   const listedCommands = mode === "full" && isRoot ? COMMANDS.filter((entry) => entry.id !== "root.help") : children;
   const optionEntries = commandDefinition.optionIds.map((optionId) => {
     const definition = getOption(optionId);

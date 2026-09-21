@@ -1,0 +1,174 @@
+import type { ArchitectureDocumentV1, CanonSectionName } from "../architecture/canon/document.js";
+import type { CodeIntent } from "../architecture/canon/code-intent-contract.js";
+import type { CanonVersion } from "../architecture/canon/identity.js";
+import type { Digest, JsonValue } from "./digest.js";
+import type { SemanticEntryKey } from "./entry-key.js";
+
+export const DESIGN_CHANGE_CONTRACT_VERSION = 1 as const;
+
+export type DesignChangeContractVersion = typeof DESIGN_CHANGE_CONTRACT_VERSION;
+
+export interface CanonRevisionReference {
+  readonly repositoryRevision: string;
+  readonly canonVersion: CanonVersion;
+  readonly canonDigest: Digest;
+}
+
+export interface RepositoryRevisionReference {
+  readonly repository: string;
+  readonly revision: string;
+}
+
+export interface AddedSemanticEntry {
+  readonly kind: "added";
+  readonly entryKey: SemanticEntryKey;
+  readonly value: JsonValue;
+}
+
+export interface ModifiedSemanticEntry {
+  readonly kind: "modified";
+  readonly entryKey: SemanticEntryKey;
+  readonly before: JsonValue;
+  readonly after: JsonValue;
+}
+
+export interface RemovedSemanticEntry {
+  readonly kind: "removed";
+  readonly entryKey: SemanticEntryKey;
+  readonly before: JsonValue;
+}
+
+export type DesignChangeOperation = AddedSemanticEntry | ModifiedSemanticEntry | RemovedSemanticEntry;
+
+export interface DesignChangeTarget {
+  readonly canonVersion: CanonVersion;
+  readonly operations: readonly DesignChangeOperation[];
+  readonly targetCanonDigest: Digest;
+}
+
+/** The digest input for a Design Change; it intentionally has no self-referential digest field. */
+export interface DesignChangeSetPayload {
+  readonly contractVersion: DesignChangeContractVersion;
+  readonly changeId: string;
+  readonly base: CanonRevisionReference;
+  readonly target: DesignChangeTarget;
+}
+
+export interface DesignChangeSet extends DesignChangeSetPayload {
+  readonly digest: Digest;
+}
+
+export type DesignChangeLifecycleState =
+  "draft" | "design-review" | "approved" | "implementing" | "certification-review" | "promoted";
+
+export type DesignReviewDecision = "approved" | "changes-requested" | "rejected";
+
+export interface EvidenceReference {
+  readonly provider: string;
+  readonly reference: string;
+}
+
+export interface DesignReviewEvidence {
+  readonly reviewId: string;
+  readonly changeId: string;
+  readonly proposalDigest: Digest;
+  readonly proposalRevision: string;
+  readonly decision: DesignReviewDecision;
+  readonly actor: string;
+  readonly reason: string;
+  readonly timestamp: string;
+  readonly evidence: readonly EvidenceReference[];
+}
+
+export interface ExternalIssueReference {
+  readonly repositoryHost: string;
+  readonly repositoryId: string;
+  readonly repository?: string;
+  readonly number: number;
+}
+
+export type ImplementationIdentity = ExternalIssueReference;
+
+export interface ImplementationLink {
+  readonly linkId: string;
+  readonly changeId: string;
+  readonly changeDigest: Digest;
+  readonly implementation: ExternalIssueReference;
+  readonly targetEntryKeys: readonly SemanticEntryKey[];
+  readonly evidence?: readonly EvidenceReference[];
+}
+
+export type CertificationFinding = "match" | "mismatch" | "unresolved";
+
+export interface CertificationCheck {
+  readonly checkId: string;
+  readonly targetEntryKey?: SemanticEntryKey;
+  readonly result: CertificationFinding;
+  readonly detail?: string;
+}
+
+export interface CertificationEvidence {
+  readonly certificationId: string;
+  readonly changeId: string;
+  readonly changeDigest: Digest;
+  readonly implementationRevision: RepositoryRevisionReference;
+  readonly result: CertificationFinding;
+  readonly checks: readonly CertificationCheck[];
+  readonly recordedAt: string;
+  readonly references?: readonly EvidenceReference[];
+}
+
+export interface DesignIntentLifecycleRecord {
+  readonly changeId: string;
+  readonly changeDigest: Digest;
+  readonly state: DesignChangeLifecycleState;
+  readonly review?: DesignReviewEvidence;
+  readonly implementations: readonly ImplementationLink[];
+  readonly certification?: CertificationEvidence;
+}
+
+/**
+ * The immutable event facts supplied to the lifecycle machine. The replay
+ * record keeps its richer event-kind union, while the shared machine boundary
+ * depends only on these transport-neutral fields.
+ */
+export interface MachineTransitionEvent {
+  readonly changeId: string;
+  readonly sequence: number;
+  readonly previousEventDigest: Digest;
+  readonly recordedAt: string;
+  readonly kind?: string;
+  readonly type?: string;
+  readonly event?: string;
+  readonly payload?: JsonValue;
+  readonly eventDigest: Digest;
+}
+
+/** Facts supplied to the sole lifecycle transition authority. */
+export interface MachineTransitionContext {
+  readonly changeId: string;
+  readonly proposalDigest: Digest;
+  /** Immutable Git revision resolved for the current proposal, when available. */
+  readonly proposalRevision?: string;
+  readonly review?: DesignReviewEvidence;
+  readonly implementations: readonly ImplementationLink[];
+  readonly certification?: CertificationEvidence;
+}
+
+export interface MachineTransitionRequest {
+  readonly state: DesignChangeLifecycleState;
+  readonly event: MachineTransitionEvent;
+  readonly context: MachineTransitionContext;
+}
+
+export interface MachineTransitionResult {
+  readonly state: DesignChangeLifecycleState;
+}
+
+export type DesignChangeSection = CanonSectionName | "codeIntent";
+
+export interface DesignIntentCanonView {
+  readonly current: ArchitectureDocumentV1;
+  readonly proposed?: ArchitectureDocumentV1;
+  readonly codeIntent?: readonly CodeIntent[];
+}
