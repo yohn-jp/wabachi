@@ -45,11 +45,26 @@ function validateWorkingSetQualityCorpus() {
   }
 }
 
+function validateNestedDesignTestDiscovery() {
+  const designRoot = path.join(repoRoot, "src", "design");
+  const discovered = fs
+    .readdirSync(designRoot, { recursive: true })
+    .filter((entry) => typeof entry === "string" && entry.endsWith(".test.ts"))
+    .sort();
+
+  if (discovered.length === 0) {
+    throw new Error("nested src/design test discovery found no TypeScript test files");
+  }
+
+  console.log(`nested src/design test discovery verified: ${discovered.length} file(s).`);
+}
+
 function main() {
   const distEntry = path.join(repoRoot, "dist", "index.js");
   if (!fs.existsSync(distEntry)) throw new Error("dist is missing; run pnpm run build before the package suite");
 
   validateWorkingSetQualityCorpus();
+  validateNestedDesignTestDiscovery();
 
   const packResult = run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"]);
   const packReport = JSON.parse(packResult.stdout);
