@@ -67,11 +67,22 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function toRevision(value: unknown): Revision | undefined {
   const record = asRecord(value);
-  if (record === undefined) return undefined;
-  if (typeof record.repository === "string" && typeof record.revision === "string") {
+  if (
+    record !== undefined &&
+    typeof record.repository === "string" &&
+    record.repository.length > 0 &&
+    typeof record.revision === "string" &&
+    record.revision.length > 0
+  ) {
     return { repository: record.repository, revision: record.revision };
   }
-  if (typeof record.source === "string" && typeof record.commitSha === "string") {
+  if (
+    record !== undefined &&
+    typeof record.source === "string" &&
+    record.source.length > 0 &&
+    typeof record.commitSha === "string" &&
+    record.commitSha.length > 0
+  ) {
     return { repository: record.source, revision: record.commitSha };
   }
   return undefined;
@@ -108,7 +119,9 @@ function asProvider(value: unknown): ProviderIdentity | undefined {
   if (
     record === undefined ||
     typeof record.id !== "string" ||
+    record.id.length === 0 ||
     typeof record.version !== "string" ||
+    record.version.length === 0 ||
     (record.determinism !== "deterministic" && record.determinism !== "non-deterministic")
   ) {
     return undefined;
@@ -147,6 +160,8 @@ function objectProviderMatches(object: FactObject, provider: ProviderIdentity): 
 function validProvenance(fact: FactEnvelope): boolean {
   const native = fact.nativeEvidence;
   if (native === undefined || typeof native.id !== "string" || native.id.length === 0) return false;
+  if (fact.repository.source.length === 0 || fact.repository.commitSha.length === 0) return false;
+  if (fact.provider.id.length === 0 || fact.provider.version.length === 0) return false;
   if (!sameProvider(native.provider, fact.provider)) return false;
   if (native.source.path !== fact.source.path || native.source.span !== fact.source.span) return false;
   if (
@@ -279,13 +294,16 @@ export function admitRepositoryEvidence(input: RepositoryEvidenceInput | unknown
   const treePaths: string[] = [];
   const reasons: string[] = [];
   if (tree !== undefined) {
+    const treeRepository = tree.repository;
+    const requestedRepository = expected ?? derivedRepository;
     if (
-      tree.repository !== undefined &&
-      derivedRepository !== undefined &&
-      !sameRevision(tree.repository, derivedRepository)
+      treeRepository !== undefined &&
+      requestedRepository !== undefined &&
+      !sameRevision(treeRepository, requestedRepository)
     ) {
       reasons.push("repository tree revision differs from requested revision");
     }
+    if (derivedRepository === undefined && treeRepository !== undefined) derivedRepository = treeRepository;
     for (const value of tree.paths) {
       if (typeof value !== "string") {
         reasons.push("repository tree contains a non-string path");

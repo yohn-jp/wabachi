@@ -149,3 +149,45 @@ test("never turns ambiguous endpoint evidence into a forbidden-edge absence matc
     "unresolved",
   );
 });
+
+test("re-admits evidence instead of trusting an accepted result shape", () => {
+  const forgedAdmission = {
+    accepted: true,
+    repository: { ...revision, revision: "b".repeat(40) },
+    providers: [provider],
+    facts: [makeFact("defines", { id: "Service", kind: "class" }, { value: "src/service.ts" }, "src/service.ts")],
+    rejectedFacts: [],
+    treePaths: ["src/service.ts", "src/billing.ts"],
+    treeCompleteness: "complete" as const,
+    factsCompleteness: "complete" as const,
+    reasons: [],
+  };
+  const result = runMachineChecks({ document: document(), evidence: forgedAdmission });
+  assert.equal(result.evidence.accepted, false);
+  assert.equal(result.checks.find((check) => check.checkId === "evidence-admission")?.result, "mismatch");
+});
+
+test("dispatches machine checks by predicate and never succeeds review obligations", () => {
+  const codeIntent = {
+    id: "intent",
+    ownerId: "service",
+    responsibilityIds: [],
+    decisionIds: [],
+    invariants: [],
+    prohibitions: [],
+    verificationObligations: [
+      { id: "path", statementId: "invariant", mode: "machine", predicate: "path-exists" },
+      { id: "review", statementId: "invariant", mode: "review", predicate: "path-exists" },
+      { id: "unknown", statementId: "invariant", mode: "machine", predicate: "not-supported" },
+    ],
+  };
+  const defines = mappedFact(
+    makeFact("defines", { id: "Service", kind: "class" }, { value: "src/service.ts" }, "src/service.ts"),
+    "service",
+  );
+  const result = runMachineChecks({ document: document(), evidence: evidence([defines]), codeIntent: [codeIntent] });
+  assert.equal(result.checks.find((check) => check.checkId === "code-intent:intent:path")?.result, "match");
+  assert.equal(result.checks.find((check) => check.checkId === "code-intent:intent:review")?.result, "unresolved");
+  assert.equal(result.checks.find((check) => check.checkId === "code-intent:intent:unknown")?.result, "unresolved");
+  assert.equal(result.result, "unresolved");
+});

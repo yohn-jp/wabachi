@@ -260,6 +260,7 @@ function codeIntentChecks(
   evidence: AdmittedRepositoryEvidence,
   mappings: MappingIndex,
   codeIntent: readonly CodeIntent[] | undefined,
+  constraints: readonly ArchitectureConstraint[],
 ): CertificationCheck[] {
   if (codeIntent === undefined) return [];
   const checks: CertificationCheck[] = [];
@@ -276,9 +277,28 @@ function codeIntentChecks(
       continue;
     }
     for (const obligation of intent.verificationObligations) {
-      const mode = obligation.mode.trim().toLowerCase();
       const target = safeEntryKey("code-intent", [intent.id, obligation.id]);
-      if (mode === "path" || mode === "path-exists" || mode === "repository-path") {
+      const mode = typeof obligation.mode === "string" ? obligation.mode.trim().toLowerCase() : "";
+      const predicate = typeof obligation.predicate === "string" ? obligation.predicate.trim().toLowerCase() : "";
+
+      // Review obligations require human review and must never be admitted as
+      // machine evidence. Predicate selection is deliberately independent of
+      // mode: mode only determines whether this machine checker may handle it.
+      if (mode !== "machine") {
+        checks.push(
+          check(
+            `code-intent:${intent.id}:${obligation.id}`,
+            "unresolved",
+            mode === "review"
+              ? "Code Intent review obligation is not machine-checkable"
+              : "unsupported Code Intent verification mode",
+            target,
+          ),
+        );
+        continue;
+      }
+
+      if (predicate === "path-exists" || predicate === "path" || predicate === "repository-path") {
         const results = pathCheck({ evidence, mapping });
         if (results.length === 0) {
           checks.push(
@@ -299,7 +319,7 @@ function codeIntentChecks(
             ),
           );
         }
-      } else if (mode === "symbol" || mode === "symbol-exists" || mode === "defines") {
+      } else if (predicate === "defines" || predicate === "symbol-exists" || predicate === "symbol") {
         const results = symbolCheck(evidence, mapping);
         if (results.length === 0) {
           checks.push(
@@ -320,12 +340,46 @@ function codeIntentChecks(
             ),
           );
         }
+      } else if (predicate === "must-not-depend-on") {
+        const dependencyResults = constraints
+          .filter(
+            (constraint): constraint is Extract<ArchitectureConstraint, { readonly kind: "must-not-depend-on" }> =>
+              constraint.kind === "must-not-depend-on" && constraint.source === intent.ownerId,
+          )
+          .map((constraint) => {
+            const source = mappings.byCanonId.get(constraint.source);
+            const targetMapping = mappings.byCanonId.get(constraint.target);
+            if (
+              source === undefined ||
+              targetMapping === undefined ||
+              mappings.ambiguousCanonIds.has(constraint.source) ||
+              mappings.ambiguousCanonIds.has(constraint.target)
+            ) {
+              return check(
+                `forbidden-dependency:${constraint.source}:${constraint.target}`,
+                "unresolved",
+                "forbidden dependency has no unambiguous source and target repository mapping",
+                safeEntryKey("constraint", [constraint.kind, constraint.source, constraint.target]),
+              );
+            }
+            return dependencyCheck(evidence, constraint, source, targetMapping);
+          });
+        checks.push(
+          check(
+            `code-intent:${intent.id}:${obligation.id}`,
+            dependencyResults.length === 0 ? "unresolved" : aggregate(dependencyResults),
+            dependencyResults.length === 0
+              ? "Code Intent forbidden-dependency obligation has no mapped constraint"
+              : `Code Intent forbidden-dependency obligation: ${dependencyResults.map((result) => result.result).join(", ")}`,
+            target,
+          ),
+        );
       } else {
         checks.push(
           check(
             `code-intent:${intent.id}:${obligation.id}`,
             "unresolved",
-            `unsupported verification mode: ${obligation.mode}`,
+            `unsupported verification predicate: ${obligation.predicate}`,
             target,
           ),
         );
@@ -335,20 +389,7 @@ function codeIntentChecks(
   return checks;
 }
 
-function alreadyAdmitted(value: unknown): value is AdmittedRepositoryEvidence {
-  const record = asRecord(value);
-  return (
-    record !== undefined &&
-    typeof record.accepted === "boolean" &&
-    Array.isArray(record.facts) &&
-    Array.isArray(record.rejectedFacts) &&
-    (record.factsCompleteness === "complete" || record.factsCompleteness === "partial") &&
-    (record.treeCompleteness === "complete" || record.treeCompleteness === "partial")
-  );
-}
-
 function evidenceInput(input: Record<string, unknown>, evidence: unknown): AdmittedRepositoryEvidence {
-  if (alreadyAdmitted(evidence)) return evidence;
   const candidate = asRecord(evidence);
   if (candidate !== undefined) {
     return admitRepositoryEvidence({
@@ -433,7 +474,14 @@ export function runMachineChecks(input: MachineCheckInput | unknown): MachineChe
     }
   }
 
-  checks.push(...codeIntentChecks(evidence, mappings, inputRecord.codeIntent as readonly CodeIntent[] | undefined));
+  checks.push(
+    ...codeIntentChecks(
+      evidence,
+      mappings,
+      inputRecord.codeIntent as readonly CodeIntent[] | undefined,
+      document.constraints,
+    ),
+  );
   const ordered = sortChecks(checks);
   return { result: aggregate(ordered), checks: ordered, evidence };
 }
