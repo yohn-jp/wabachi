@@ -175,6 +175,65 @@ test("requires GitPort ancestry when completed leaves differ", async () => {
   assert.equal(ancestryChecks, 2);
 });
 
+test("requires ancestry proof when one completed leaf differs from integration", async () => {
+  const current = change([keyA]);
+  const external = implementation(1);
+  const leafRevision = { repository: "repo", revision: "leaf" };
+  const integrationRevision = { repository: "repo", revision: "integration" };
+  let ancestryChecks = 0;
+  const git = {
+    isAncestor(ancestor: RepositoryRevisionReference, descendant: RepositoryRevisionReference): Promise<boolean> {
+      ancestryChecks += 1;
+      return Promise.resolve(ancestor.revision === "leaf" && descendant.revision === "integration");
+    },
+  };
+
+  const result = await evaluateCoverage({
+    change: current,
+    links: [link(current, "link-a", external, [keyA])],
+    completionEvidence: [completion(current, "evidence-a", external, leafRevision)],
+    integrationRevision,
+    git,
+  });
+
+  assert.equal(result.complete, true);
+  assert.equal(result.result, "match");
+  assert.equal(ancestryChecks, 1);
+});
+
+test("fails closed when one completed leaf differs and GitPort is unavailable", async () => {
+  const current = change([keyA]);
+  const external = implementation(1);
+  const result = await evaluateCoverage({
+    change: current,
+    links: [link(current, "link-a", external, [keyA])],
+    completionEvidence: [completion(current, "evidence-a", external, { repository: "repo", revision: "leaf" })],
+    integrationRevision: { repository: "repo", revision: "integration" },
+  });
+
+  assert.equal(result.complete, false);
+  assert.equal(result.result, "unresolved");
+  assert.equal(
+    result.findings.some((finding) => finding.kind === "non-integrated-revision"),
+    true,
+  );
+});
+
+test("does not require ancestry when leaf and integration revisions are equal", async () => {
+  const current = change([keyA]);
+  const external = implementation(1);
+  const integrationRevision = { repository: "repo", revision: "same" };
+  const result = await evaluateCoverage({
+    change: current,
+    links: [link(current, "link-a", external, [keyA])],
+    completionEvidence: [completion(current, "evidence-a", external, integrationRevision)],
+    integrationRevision,
+  });
+
+  assert.equal(result.complete, true);
+  assert.equal(result.result, "match");
+});
+
 test("a failed completion proof remains unresolved even when target links are complete", async () => {
   const current = change([keyA]);
   const external = implementation(1);

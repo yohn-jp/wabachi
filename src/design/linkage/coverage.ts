@@ -305,14 +305,16 @@ export async function evaluateCoverage(input: CoverageInput): Promise<CoverageRe
   const leafRevisions = [...candidateRevisions.values()];
   const integrationRevision = input.integrationRevision;
   const requiresIntegration = new Set<string>();
-  if (leafRevisions.length > 1) {
-    if (integrationRevision === undefined || input.git === undefined) {
-      for (const revision of leafRevisions) requiresIntegration.add(revisionKey(revision));
-    } else {
-      for (const revision of leafRevisions) {
-        if (!sameRevision(revision, integrationRevision)) requiresIntegration.add(revisionKey(revision));
-      }
+  if (integrationRevision !== undefined) {
+    // Every leaf whose completion revision differs from the integration
+    // revision needs an ancestry proof, including the single-leaf case.
+    for (const revision of leafRevisions) {
+      if (!sameRevision(revision, integrationRevision)) requiresIntegration.add(revisionKey(revision));
     }
+  } else if (leafRevisions.length > 1) {
+    // Without an integration revision, multiple distinct leaves cannot be
+    // shown to belong to one integration and therefore fail closed.
+    for (const revision of leafRevisions) requiresIntegration.add(revisionKey(revision));
   }
 
   const ancestry = new Map<string, boolean>();
@@ -320,10 +322,6 @@ export async function evaluateCoverage(input: CoverageInput): Promise<CoverageRe
     const key = revisionKey(revision);
     if (!requiresIntegration.has(key)) continue;
     if (integrationRevision === undefined || input.git === undefined) {
-      ancestry.set(key, false);
-      continue;
-    }
-    if (revision.repository !== integrationRevision.repository) {
       ancestry.set(key, false);
       continue;
     }
