@@ -205,7 +205,9 @@ function treeInput(
   if (Array.isArray(tree)) {
     return {
       paths: tree,
-      completeness: completeness(record, "tree", "complete"),
+      // A path list has no claim that the repository tree was exhaustively
+      // enumerated. Absence is conclusive only with an explicit assertion.
+      completeness: completeness(record, "tree", "partial"),
     };
   }
   const treeRecord = asRecord(tree);
@@ -226,7 +228,8 @@ function treeInput(
   if (Array.isArray(record.treePaths)) {
     return {
       paths: record.treePaths,
-      completeness: completeness(record, "tree", "complete"),
+      // Bare treePaths are observations, not proof that no other path exists.
+      completeness: completeness(record, "tree", "partial"),
     };
   }
   return undefined;

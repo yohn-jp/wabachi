@@ -65,6 +65,19 @@ test("keeps missing tree paths unresolved when the tree is partial", () => {
   assert.deepEqual(evidence.treePaths, ["src/other.ts"]);
 });
 
+test("does not infer complete coverage from bare tree observations", () => {
+  const tree = admitRepositoryEvidence({
+    repository: revision,
+    tree: ["src/other.ts"],
+  });
+  const treePaths = admitRepositoryEvidence({
+    repository: revision,
+    treePaths: ["src/other.ts"],
+  });
+  assert.equal(tree.treeCompleteness, "partial");
+  assert.equal(treePaths.treeCompleteness, "partial");
+});
+
 test("does not admit a result-shaped record without repository evidence", () => {
   const forged = admitRepositoryEvidence({
     accepted: true,
