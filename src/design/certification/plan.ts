@@ -319,7 +319,9 @@ export function resolveCertificationProof(
   }
   const byId = new Map<string, CertificationCheck>();
   for (const check of checks) {
-    if (byId.has(check.checkId)) return Object.freeze({ result: "unresolved", checks: Object.freeze([...checks]) });
+    if (byId.has(check.checkId) || !plan.obligations.some((obligation) => obligation.id === check.checkId)) {
+      return Object.freeze({ result: "unresolved", checks: Object.freeze([...checks]) });
+    }
     byId.set(check.checkId, check);
   }
   const resolved = plan.obligations.map((obligation) => {
@@ -343,7 +345,10 @@ export function resolveCertificationProof(
     if (obligation.mode === "machine" && !isSupportedMachinePredicate(obligation.predicate)) {
       return Object.freeze({ ...supplied, result: "unresolved" as const, detail: "machine predicate is unsupported" });
     }
-    return Object.freeze({ ...supplied, result: supplied.result === "match" ? "match" : supplied.result });
+    if (supplied.result !== "match" && supplied.result !== "mismatch" && supplied.result !== "unresolved") {
+      return Object.freeze({ ...supplied, result: "unresolved" as const, detail: "check result is unsupported" });
+    }
+    return Object.freeze({ ...supplied, result: supplied.result });
   });
   const result: CertificationFinding = resolved.some((check) => check.result === "mismatch")
     ? "mismatch"
