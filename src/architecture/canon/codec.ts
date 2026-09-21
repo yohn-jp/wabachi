@@ -1,5 +1,6 @@
 import {
   createArchitectureDocument,
+  CODE_INTENT_SCHEMA_VERSION,
   type ArchitectureDocumentInput,
   type ArchitectureDocumentV1,
   type GlobalIdentityNamespace,
@@ -25,8 +26,11 @@ const CANON_DOCUMENT_FIELDS = [
   "repositoryMappings",
   "decisions",
   "views",
+  "codeIntents",
   "globalIdentityRegistry",
 ] as const;
+
+const REQUIRED_CANON_DOCUMENT_FIELDS = CANON_DOCUMENT_FIELDS.filter((field) => field !== "codeIntents");
 
 const GLOBAL_IDENTITY_NAMESPACES: readonly GlobalIdentityNamespace[] = [
   "architecture",
@@ -37,6 +41,7 @@ const GLOBAL_IDENTITY_NAMESPACES: readonly GlobalIdentityNamespace[] = [
   "flow",
   "decision",
   "reference",
+  "code-intent",
 ];
 
 function compareStrings(left: string, right: string): number {
@@ -504,6 +509,71 @@ function readDecisions(value: unknown): JsonRecord {
   };
 }
 
+function readCodeIntentStatement(value: unknown, label: string): JsonRecord {
+  const record = readRecord(value, label, ["id", "text"], ["id", "text"]);
+  return {
+    id: readRequiredString(record, "id", label),
+    text: readRequiredString(record, "text", label),
+  };
+}
+
+function readCodeIntentObligation(value: unknown): JsonRecord {
+  const record = readRecord(
+    value,
+    "code intent verification obligation",
+    ["id", "statementId", "mode", "predicate"],
+    ["id", "statementId", "mode", "predicate"],
+  );
+  return {
+    id: readRequiredString(record, "id", "code intent verification obligation"),
+    statementId: readRequiredString(record, "statementId", "code intent verification obligation"),
+    mode: readRequiredString(record, "mode", "code intent verification obligation"),
+    predicate: readRequiredString(record, "predicate", "code intent verification obligation"),
+  };
+}
+
+function readCodeIntent(value: unknown): JsonRecord {
+  const record = readRecord(
+    value,
+    "code intent",
+    ["id", "ownerId", "responsibilityIds", "decisionIds", "invariants", "prohibitions", "verificationObligations"],
+    ["id", "ownerId", "responsibilityIds", "decisionIds", "invariants", "prohibitions", "verificationObligations"],
+  );
+  return {
+    id: readRequiredString(record, "id", "code intent"),
+    ownerId: readRequiredString(record, "ownerId", "code intent"),
+    responsibilityIds: readArrayField(record, "responsibilityIds", "code intent").map((id) => {
+      if (typeof id !== "string") throw new TypeError("code intent responsibilityIds must contain strings");
+      return id;
+    }),
+    decisionIds: readArrayField(record, "decisionIds", "code intent").map((id) => {
+      if (typeof id !== "string") throw new TypeError("code intent decisionIds must contain strings");
+      return id;
+    }),
+    invariants: readArrayField(record, "invariants", "code intent").map((statement, index) =>
+      readCodeIntentStatement(statement, `code intent invariants[${index}]`),
+    ),
+    prohibitions: readArrayField(record, "prohibitions", "code intent").map((statement, index) =>
+      readCodeIntentStatement(statement, `code intent prohibitions[${index}]`),
+    ),
+    verificationObligations: readArrayField(record, "verificationObligations", "code intent").map(
+      readCodeIntentObligation,
+    ),
+  };
+}
+
+function readCodeIntents(value: unknown): JsonRecord {
+  const record = readRecord(value, "code intents", ["schemaVersion", "entries"], ["schemaVersion", "entries"]);
+  const schemaVersion = record.schemaVersion;
+  if (schemaVersion !== CODE_INTENT_SCHEMA_VERSION) {
+    throw new TypeError(`unsupported Code Intent schemaVersion: ${String(schemaVersion)}`);
+  }
+  return {
+    schemaVersion: CODE_INTENT_SCHEMA_VERSION,
+    entries: readArrayField(record, "entries", "code intents").map(readCodeIntent),
+  };
+}
+
 function readViewReference(value: unknown): JsonRecord {
   const record = readRecord(value, "view reference", ["kind", "id"], ["kind", "id"]);
   return {
@@ -573,7 +643,7 @@ function readDocumentInput(value: unknown): {
   readonly input: ArchitectureDocumentInput;
   readonly registry: readonly JsonRecord[];
 } {
-  const record = readRecord(value, "architecture document", CANON_DOCUMENT_FIELDS, CANON_DOCUMENT_FIELDS);
+  const record = readRecord(value, "architecture document", CANON_DOCUMENT_FIELDS, REQUIRED_CANON_DOCUMENT_FIELDS);
   const version = record.canonVersion;
   if (typeof version !== "number" || !Number.isInteger(version)) {
     throw new TypeError("architecture document canonVersion must be an integer");
@@ -600,6 +670,7 @@ function readDocumentInput(value: unknown): {
       ),
       decisions: readDecisions(record.decisions),
       views: readArrayField(record, "views", "architecture document").map(readView),
+      ...(Object.hasOwn(record, "codeIntents") ? { codeIntents: readCodeIntents(record.codeIntents) } : {}),
     } as unknown as ArchitectureDocumentInput,
     registry: readRegistry(record.globalIdentityRegistry),
   };
