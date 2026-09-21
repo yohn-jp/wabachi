@@ -4,14 +4,10 @@ import {
   type ArchitectureDocumentV1,
 } from "../../architecture/canon/document.js";
 import { validateArchitectureDocument } from "../../architecture/canon/validate.js";
-import {
-  createSemanticEntryKey,
-  SEMANTIC_ENTRY_COLLECTIONS,
-  type SemanticEntryCollection,
-  type SemanticEntryKey,
-} from "../entry-key.js";
+import { parseSemanticEntryKey, type SemanticEntryCollection, type SemanticEntryKey } from "../entry-key.js";
 import { digestJson, type Digest, type JsonValue } from "../digest.js";
 import type { DesignChangeOperation, DesignChangeSetPayload } from "../contracts.js";
+import { deriveSemanticEntries, deriveSemanticEntryKey, type EntryGroup } from "./identity.js";
 
 type MutableRecord = Record<string, unknown>;
 
@@ -67,8 +63,6 @@ interface PreparedOperation {
   readonly addition?: EntrySlot;
 }
 
-const COLLECTIONS = new Set<string>(SEMANTIC_ENTRY_COLLECTIONS);
-
 function fail(message: string): never {
   throw new Error("cannot apply Design Change: " + message);
 }
@@ -85,153 +79,12 @@ function stringProperty(record: MutableRecord, property: string): string | undef
   return typeof value === "string" ? value : undefined;
 }
 
-function keyFor(collection: SemanticEntryCollection, identity: readonly string[]): string {
-  return createSemanticEntryKey({ collection, identity });
-}
-
 function parseEntryKey(entryKey: SemanticEntryKey): ParsedEntryKey {
-  if (typeof entryKey !== "string") fail("entry key must be a string");
-
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(entryKey);
+    return parseSemanticEntryKey(entryKey);
   } catch {
     fail("entry key must be a canonical JSON tuple");
   }
-
-  if (!Array.isArray(parsed) || parsed.length < 2 || typeof parsed[0] !== "string") {
-    fail("entry key must contain a collection and identity tuple");
-  }
-  const collection = parsed[0];
-  const identity = parsed.slice(1);
-  if (!COLLECTIONS.has(collection) || identity.some((part) => typeof part !== "string")) {
-    fail("entry key contains an unsupported collection or malformed identity");
-  }
-
-  let canonical: string;
-  try {
-    canonical = keyFor(collection as SemanticEntryCollection, identity as string[]);
-  } catch {
-    fail("entry key contains a malformed identity");
-  }
-  if (canonical !== entryKey) fail("entry key is not canonically encoded");
-
-  return {
-    collection: collection as SemanticEntryCollection,
-    identity: identity as string[],
-    encoded: entryKey,
-  };
-}
-
-function keyAliases(collection: SemanticEntryCollection, value: unknown): readonly string[] {
-  const record = asRecord(value, collection + " entry");
-  const aliases: string[][] = [];
-  const add = (identity: readonly string[]): void => {
-    try {
-      const encoded = keyFor(collection, identity);
-      if (!aliases.some((candidate) => keyFor(collection, candidate) === encoded)) aliases.push([...identity]);
-    } catch {
-      // Invalid values are rejected by the composer; they cannot identify an entry during preflight.
-    }
-  };
-
-  switch (collection) {
-    case "architecture": {
-      const id = stringProperty(record, "id");
-      if (id !== undefined) add([id]);
-      break;
-    }
-    case "element":
-    case "interface":
-    case "responsibility":
-    case "boundary":
-    case "flow":
-    case "repository-mapping": {
-      const id = collection === "repository-mapping" ? stringProperty(record, "canonId") : stringProperty(record, "id");
-      if (id !== undefined) add([id]);
-      break;
-    }
-    case "relationship": {
-      const source = stringProperty(record, "source");
-      const target = stringProperty(record, "target");
-      const kind = stringProperty(record, "kind");
-      if (source !== undefined && target !== undefined && kind !== undefined) {
-        const identity = [source, target, kind];
-        const interfaceId = stringProperty(record, "interfaceId");
-        if (interfaceId !== undefined) identity.push(interfaceId);
-        add(identity);
-      }
-      break;
-    }
-    case "authority": {
-      const kind = stringProperty(record, "kind");
-      const owner = stringProperty(record, "owner");
-      const target = stringProperty(record, "concern") ?? stringProperty(record, "resource");
-      if (kind !== undefined && target !== undefined && owner !== undefined) {
-        add([target, owner]);
-        add([kind, target, owner]);
-      }
-      break;
-    }
-    case "constraint": {
-      const kind = stringProperty(record, "kind");
-      if (kind === "single-authority") {
-        const concern = stringProperty(record, "concern");
-        if (concern !== undefined) add([kind, concern]);
-      } else if (kind === "must-go-through") {
-        const source = stringProperty(record, "source");
-        const target = stringProperty(record, "target");
-        const through = stringProperty(record, "through");
-        if (source !== undefined && target !== undefined && through !== undefined) add([kind, source, target, through]);
-      } else if (kind !== undefined) {
-        const source = stringProperty(record, "source");
-        const target = stringProperty(record, "target");
-        if (source !== undefined && target !== undefined) add([kind, source, target]);
-      }
-      break;
-    }
-    case "deployment": {
-      const kind = stringProperty(record, "kind");
-      if (kind === "deployment-mapping") {
-        const softwareElementId = stringProperty(record, "softwareElementId");
-        const deploymentInstanceId = stringProperty(record, "deploymentInstanceId");
-        if (softwareElementId !== undefined && deploymentInstanceId !== undefined) {
-          add([softwareElementId, deploymentInstanceId]);
-          add([kind, softwareElementId, deploymentInstanceId]);
-        }
-      } else {
-        const id = stringProperty(record, "id");
-        if (kind !== undefined && id !== undefined) {
-          add([id]);
-          add([kind, id]);
-        }
-      }
-      break;
-    }
-    case "decision": {
-      const id = stringProperty(record, "id");
-      if (id !== undefined) {
-        add([id]);
-        add(["decision", id]);
-        add(["reference", id]);
-      }
-      const targetId = stringProperty(record, "targetId");
-      if (targetId !== undefined && Array.isArray(record.referenceIds)) {
-        add([targetId]);
-        add(["reference-attachment", targetId]);
-      }
-      break;
-    }
-    case "view": {
-      const key = stringProperty(record, "key");
-      if (key !== undefined) add([key]);
-      break;
-    }
-    case "code-intent":
-      break;
-  }
-
-  return aliases.map((identity) => keyFor(collection, identity));
 }
 
 function categoryFor(collection: SemanticEntryCollection, value: unknown): string {
@@ -298,19 +151,6 @@ function createAppendSlot(token: string, category: string, values: unknown[]): E
   };
 }
 
-function addCurrentEntries(
-  entries: CurrentEntry[],
-  collection: SemanticEntryCollection,
-  values: unknown[],
-  category: (value: unknown) => string = () => collection,
-  path: string = collection,
-): void {
-  for (const value of values) {
-    const slot = createArraySlot(path + ":" + entries.length, category(value), values, value);
-    entries.push({ slot, aliases: keyAliases(collection, value) });
-  }
-}
-
 function workingCanon(base: ArchitectureDocumentV1): WorkingCanon {
   return {
     documentId: base.documentId,
@@ -343,8 +183,93 @@ function workingCanon(base: ArchitectureDocumentV1): WorkingCanon {
   };
 }
 
-function currentEntries(working: WorkingCanon): CurrentEntry[] {
+function valuesForGroup(working: WorkingCanon, group: EntryGroup): unknown[] {
+  switch (group) {
+    case "architecture":
+      return [working.root];
+    case "elements":
+      return working.elements;
+    case "interfaces":
+      return working.interfaces;
+    case "relationships":
+      return working.relationships;
+    case "responsibilities":
+      return working.responsibilities.responsibilities;
+    case "authority":
+      return working.authority.authority;
+    case "ownership":
+      return working.authority.ownership;
+    case "boundaries":
+      return working.boundaries;
+    case "constraints":
+      return working.constraints;
+    case "flows":
+      return working.flows;
+    case "runtimeEnvironments":
+      return working.deployment.runtimeEnvironments;
+    case "deploymentNodes":
+      return working.deployment.deploymentNodes;
+    case "deploymentInstances":
+      return working.deployment.deploymentInstances;
+    case "infrastructureReferences":
+      return working.deployment.infrastructureReferences;
+    case "deploymentMappings":
+      return working.deployment.mappings;
+    case "repositoryMappings":
+      return working.repositoryMappings;
+    case "decisions":
+      return working.decisions.decisions;
+    case "decisionReferences":
+      return working.decisions.references;
+    case "referenceAttachments":
+      return working.decisions.referenceAttachments;
+    case "views":
+      return working.views;
+  }
+}
+
+function collectionForGroup(group: EntryGroup): SemanticEntryCollection {
+  switch (group) {
+    case "architecture":
+      return "architecture";
+    case "elements":
+      return "element";
+    case "interfaces":
+      return "interface";
+    case "relationships":
+      return "relationship";
+    case "responsibilities":
+      return "responsibility";
+    case "authority":
+    case "ownership":
+      return "authority";
+    case "boundaries":
+      return "boundary";
+    case "constraints":
+      return "constraint";
+    case "flows":
+      return "flow";
+    case "runtimeEnvironments":
+    case "deploymentNodes":
+    case "deploymentInstances":
+    case "infrastructureReferences":
+    case "deploymentMappings":
+      return "deployment";
+    case "repositoryMappings":
+      return "repository-mapping";
+    case "decisions":
+    case "decisionReferences":
+    case "referenceAttachments":
+      return "decision";
+    case "views":
+      return "view";
+  }
+}
+
+function currentEntries(working: WorkingCanon, base: ArchitectureDocumentV1): CurrentEntry[] {
   const entries: CurrentEntry[] = [];
+  const groupIndexes = new Map<EntryGroup, number>();
+  const semanticEntries = deriveSemanticEntries(base);
   const rootSlot: EntrySlot = {
     token: "architecture:root",
     category: "architecture",
@@ -356,75 +281,25 @@ function currentEntries(working: WorkingCanon): CurrentEntry[] {
       fail("the architecture root cannot be removed");
     },
   };
-  entries.push({ slot: rootSlot, aliases: keyAliases("architecture", working.root) });
+  entries.push({ slot: rootSlot, aliases: [semanticEntries[0].entryKey] });
 
-  addCurrentEntries(entries, "element", working.elements);
-  addCurrentEntries(entries, "interface", working.interfaces);
-  addCurrentEntries(entries, "relationship", working.relationships);
-  addCurrentEntries(entries, "responsibility", working.responsibilities.responsibilities);
-  addCurrentEntries(entries, "authority", working.authority.authority, () => "authority", "authority:authority");
-  addCurrentEntries(entries, "authority", working.authority.ownership, () => "ownership", "authority:ownership");
-  addCurrentEntries(entries, "boundary", working.boundaries);
-  addCurrentEntries(entries, "constraint", working.constraints);
-  addCurrentEntries(entries, "flow", working.flows);
-  addCurrentEntries(
-    entries,
-    "deployment",
-    working.deployment.runtimeEnvironments,
-    (value) => categoryFor("deployment", value),
-    "deployment:runtime-environments",
-  );
-  addCurrentEntries(
-    entries,
-    "deployment",
-    working.deployment.deploymentNodes,
-    (value) => categoryFor("deployment", value),
-    "deployment:deployment-nodes",
-  );
-  addCurrentEntries(
-    entries,
-    "deployment",
-    working.deployment.deploymentInstances,
-    (value) => categoryFor("deployment", value),
-    "deployment:deployment-instances",
-  );
-  addCurrentEntries(
-    entries,
-    "deployment",
-    working.deployment.infrastructureReferences,
-    (value) => categoryFor("deployment", value),
-    "deployment:infrastructure-references",
-  );
-  addCurrentEntries(
-    entries,
-    "deployment",
-    working.deployment.mappings,
-    (value) => categoryFor("deployment", value),
-    "deployment:mappings",
-  );
-  addCurrentEntries(entries, "repository-mapping", working.repositoryMappings);
-  addCurrentEntries(
-    entries,
-    "decision",
-    working.decisions.decisions,
-    (value) => categoryFor("decision", value),
-    "decision:decisions",
-  );
-  addCurrentEntries(
-    entries,
-    "decision",
-    working.decisions.references,
-    (value) => categoryFor("decision", value),
-    "decision:references",
-  );
-  addCurrentEntries(
-    entries,
-    "decision",
-    working.decisions.referenceAttachments,
-    (value) => categoryFor("decision", value),
-    "decision:reference-attachments",
-  );
-  addCurrentEntries(entries, "view", working.views);
+  for (const semantic of semanticEntries.slice(1)) {
+    const values = valuesForGroup(working, semantic.group);
+    const index = groupIndexes.get(semantic.group) ?? 0;
+    const value = values[index];
+    if (value === undefined) fail("working Canon no longer matches its base identity");
+    groupIndexes.set(semantic.group, index + 1);
+    const category =
+      semantic.group === "authority"
+        ? "authority"
+        : semantic.group === "ownership"
+          ? "ownership"
+          : categoryFor(collectionForGroup(semantic.group), value);
+    entries.push({
+      slot: createArraySlot(semantic.group + ":" + index, category, values, value),
+      aliases: [semantic.entryKey],
+    });
+  }
   return entries;
 }
 
@@ -488,8 +363,68 @@ function findCurrent(entries: readonly CurrentEntry[], encoded: string): readonl
   return entries.filter((entry) => entry.aliases.includes(encoded));
 }
 
+function entryGroupFor(collection: SemanticEntryCollection, value: unknown): EntryGroup {
+  switch (collection) {
+    case "architecture":
+      return "architecture";
+    case "element":
+      return "elements";
+    case "interface":
+      return "interfaces";
+    case "relationship":
+      return "relationships";
+    case "responsibility":
+      return "responsibilities";
+    case "authority":
+      return categoryFor(collection, value) === "ownership" ? "ownership" : "authority";
+    case "boundary":
+      return "boundaries";
+    case "constraint":
+      return "constraints";
+    case "flow":
+      return "flows";
+    case "deployment": {
+      switch (categoryFor(collection, value)) {
+        case "runtime-environment":
+          return "runtimeEnvironments";
+        case "deployment-node":
+          return "deploymentNodes";
+        case "deployment-instance":
+          return "deploymentInstances";
+        case "infrastructure-reference":
+          return "infrastructureReferences";
+        default:
+          return "deploymentMappings";
+      }
+    }
+    case "repository-mapping":
+      return "repositoryMappings";
+    case "decision": {
+      switch (categoryFor(collection, value)) {
+        case "decision":
+          return "decisions";
+        case "reference":
+          return "decisionReferences";
+        default:
+          return "referenceAttachments";
+      }
+    }
+    case "view":
+      return "views";
+    case "code-intent":
+      fail("code-intent entries are not part of ArchitectureDocumentV1");
+  }
+}
+
 function assertIdentity(key: ParsedEntryKey, value: unknown, label: string): string {
-  if (!keyAliases(key.collection, value).includes(key.encoded)) {
+  const group = entryGroupFor(key.collection, value);
+  let derived: string;
+  try {
+    derived = deriveSemanticEntryKey(group, value as JsonValue);
+  } catch {
+    fail(label + " is not a valid " + group + " entry");
+  }
+  if (derived !== key.encoded) {
     fail(label + " changes the identity of " + key.encoded);
   }
   return categoryFor(key.collection, value);
@@ -505,9 +440,13 @@ function assertBeforeDigest(current: unknown, before: JsonValue, key: string): v
   if (digestJson(current) !== expected) fail("before digest mismatch for " + key);
 }
 
-function prepareOperations(working: WorkingCanon, operations: readonly DesignChangeOperation[]): PreparedOperation[] {
+function prepareOperations(
+  working: WorkingCanon,
+  base: ArchitectureDocumentV1,
+  operations: readonly DesignChangeOperation[],
+): PreparedOperation[] {
   if (!Array.isArray(operations)) fail("target operations must be an array");
-  const entries = currentEntries(working);
+  const entries = currentEntries(working, base);
   const seenKeys = new Set<string>();
   const seenSlots = new Set<string>();
   const prepared: PreparedOperation[] = [];
@@ -617,7 +556,7 @@ export function applyDesignChange(
   if (actualBaseDigest !== change.base.canonDigest) fail("base Canon digest mismatch");
 
   const working = workingCanon(base);
-  const prepared = prepareOperations(working, change.target.operations);
+  const prepared = prepareOperations(working, base, change.target.operations);
   applyPreparedOperations(prepared);
 
   const proposed = composeProposedCanon(working);

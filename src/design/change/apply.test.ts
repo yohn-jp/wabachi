@@ -10,6 +10,7 @@ import type {
   RemovedSemanticEntry,
 } from "../contracts.js";
 import { applyDesignChange } from "./apply.js";
+import { diffArchitectureDocuments } from "./diff.js";
 
 function baseCanon(): ArchitectureDocumentV1 {
   return createArchitectureDocument({
@@ -144,4 +145,76 @@ test("mutually referencing newly added entries succeed after one complete valida
 
   const result = applyDesignChange(changeFor(base, operations, target), base);
   assert.deepEqual(result, target);
+});
+
+test("production diff and apply round-trip every required semantic identity", () => {
+  const base = createArchitectureDocument({
+    documentId: "design-change-round-trip",
+    root: { id: "architecture" },
+  });
+  const relationship = { source: "orders", target: "billing", kind: "calls" as const };
+  const target = createArchitectureDocument({
+    documentId: "design-change-round-trip",
+    root: { id: "architecture" },
+    elements: [
+      { id: "billing", kind: "service" },
+      { id: "orders", kind: "service" },
+    ],
+    interfaces: [{ id: "orders-api", owner: "orders", protocol: "https" }],
+    relationships: [relationship],
+    authority: {
+      authority: [{ concern: "orders", owner: "billing" }],
+      ownership: [{ resource: "billing", owner: "orders" }],
+    },
+    constraints: [
+      { kind: "may-depend-on", source: "orders", target: "billing" },
+      { kind: "must-not-depend-on", source: "billing", target: "orders" },
+      { kind: "may-call", source: "orders", target: "billing" },
+      { kind: "must-go-through", source: "orders", target: "billing", through: "orders" },
+      { kind: "single-authority", concern: "orders" },
+    ],
+    flows: [
+      {
+        id: "checkout",
+        steps: [
+          { interfaceId: "orders-api", operation: "create" },
+          { interfaceId: "orders-api", operation: "confirm" },
+        ],
+      },
+    ],
+    deployment: {
+      runtimeEnvironments: [{ id: "production" }],
+      deploymentNodes: [{ id: "orders-node", environmentId: "production" }],
+      deploymentInstances: [{ id: "orders-instance", nodeId: "orders-node" }],
+      infrastructureReferences: [{ id: "cluster", reference: "k8s/prod" }],
+      mappings: [{ softwareElementId: "orders", deploymentInstanceId: "orders-instance" }],
+    },
+    repositoryMappings: [{ canonId: "orders", paths: ["src/orders.ts"] }],
+    decisions: {
+      decisions: [
+        {
+          id: "decide-orders",
+          title: "Orders owns billing calls",
+          status: "accepted",
+          type: "architecture",
+          rationale: "The orders service is authoritative.",
+          targetIds: ["orders"],
+          referenceIds: ["adr-orders"],
+        },
+      ],
+      references: [{ id: "adr-orders", label: "Orders ADR", uri: "https://example.invalid/orders" }],
+      referenceAttachments: [{ targetId: "orders", referenceIds: ["adr-orders"] }],
+    },
+  });
+
+  const operations = diffArchitectureDocuments(base, target);
+  const result = applyDesignChange(changeFor(base, operations, target), base);
+
+  assert.deepEqual(result, target);
+  assert.ok(operations.some((operation) => operation.entryKey.includes("relationship")));
+  assert.ok(operations.some((operation) => operation.entryKey.includes("authority")));
+  assert.ok(operations.some((operation) => operation.entryKey.includes("constraint")));
+  assert.ok(operations.some((operation) => operation.entryKey.includes("deployment-mapping")));
+  assert.ok(operations.some((operation) => operation.entryKey.includes("reference-attachment")));
+  assert.ok(operations.some((operation) => operation.entryKey.includes('"flow"')));
 });
