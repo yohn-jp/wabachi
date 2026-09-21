@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { open, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import type { DesignChangeSet, DesignIntentLifecycleRecord } from "../contracts.js";
 import type { DesignChangeStorePort, DesignLifecyclePort } from "../ports.js";
@@ -53,8 +54,12 @@ export class UnstableStorageReadError extends StorageReadError {
   }
 }
 
+function isErrno(error: unknown, code: string): boolean {
+  return error !== null && typeof error === "object" && "code" in error && error.code === code;
+}
+
 function isNotFound(error: unknown): boolean {
-  return error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT";
+  return isErrno(error, "ENOENT");
 }
 
 function digestBytes(bytes: Uint8Array): FileDigest {
@@ -69,40 +74,49 @@ function cloneBytes(bytes: Uint8Array): Uint8Array {
   return new Uint8Array(bytes);
 }
 
+async function readAt(handle: FileHandle, size: number): Promise<Buffer> {
+  const buffer = Buffer.alloc(size);
+  let offset = 0;
+  while (offset < buffer.length) {
+    const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  return buffer.subarray(0, offset);
+}
+
 async function stableBytes(filePath: string): Promise<Uint8Array | undefined> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    let before;
+    let handle;
     try {
-      before = await lstat(filePath);
+      handle = await open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    } catch (error) {
+      if (isNotFound(error) || isErrno(error, "ELOOP")) return undefined;
+      throw error;
+    }
+    try {
+      const before = await handle.stat();
       if (!before.isFile()) throw new StorageReadError(filePath, "stored artifact is not a regular file");
-    } catch (error) {
-      if (isNotFound(error)) return undefined;
-      throw error;
-    }
-    let first: Buffer;
-    let second: Buffer;
-    try {
-      first = await readFile(filePath);
-      second = await readFile(filePath);
-    } catch (error) {
-      if (isNotFound(error)) continue;
-      throw new StorageReadError(filePath, "stored artifact could not be read", { cause: error });
-    }
-    let after;
-    try {
-      after = await lstat(filePath);
-    } catch (error) {
-      if (isNotFound(error)) continue;
-      throw error;
-    }
-    if (
-      before.dev === after.dev &&
-      before.ino === after.ino &&
-      before.size === after.size &&
-      before.mtimeMs === after.mtimeMs &&
-      sameBytes(first, second)
-    ) {
-      return cloneBytes(first);
+      let first: Buffer;
+      let second: Buffer;
+      try {
+        first = await readAt(handle, before.size);
+        second = await readAt(handle, before.size);
+      } catch (error) {
+        throw new StorageReadError(filePath, "stored artifact could not be read", { cause: error });
+      }
+      const after = await handle.stat();
+      if (
+        before.dev === after.dev &&
+        before.ino === after.ino &&
+        before.size === after.size &&
+        before.mtimeMs === after.mtimeMs &&
+        sameBytes(first, second)
+      ) {
+        return cloneBytes(first);
+      }
+    } finally {
+      await handle.close();
     }
   }
   throw new UnstableStorageReadError(filePath);
