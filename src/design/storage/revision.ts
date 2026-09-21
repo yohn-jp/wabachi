@@ -185,9 +185,7 @@ export async function computeGitSubjectDigest(
     options.repositoryRoot,
   );
   const entries = parseGitTree(output).filter((entry) => !excluded.has(entry.path));
-  return digestJson(
-    entries.map(({ mode, objectId, path: entryPath }) => ({ mode, objectId, path: entryPath })),
-  );
+  return digestJson(entries.map(({ mode, objectId, path: entryPath }) => ({ mode, objectId, path: entryPath })));
 }
 
 export const computeRepositorySubjectDigest = computeGitSubjectDigest;
