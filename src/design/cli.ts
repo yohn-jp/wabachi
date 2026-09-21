@@ -89,8 +89,26 @@ async function inputJson(runtime: DesignRuntime, file: string | undefined): Prom
   return JSON.parse(source) as unknown;
 }
 
+function omitUndefinedProperties(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((entry) => omitUndefinedProperties(entry));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, entry]) => entry !== undefined)
+        .map(([key, entry]) => [key, omitUndefinedProperties(entry)]),
+    );
+  }
+  return value;
+}
+
+/** Serialize one CLI result without rejecting absent optional result fields. */
+export function serializeDesignCliOutput(value: unknown, json: boolean): string {
+  if (!json && typeof value === "string") return value;
+  return canonicalizeJson(omitUndefinedProperties(value));
+}
+
 function output(value: unknown, json: boolean): number {
-  console.log(json ? canonicalizeJson(value) : typeof value === "string" ? value : canonicalizeJson(value));
+  console.log(serializeDesignCliOutput(value, json));
   return 0;
 }
 
