@@ -62,12 +62,39 @@ function validateNestedDesignTestDiscovery() {
   console.log(`nested src/design test discovery verified: ${discovered.length} file(s).`);
 }
 
+function validateDesignCliContract() {
+  const result = run(process.execPath, ["dist/index.js", "design", "--help=json"]);
+  const projection = JSON.parse(result.stdout);
+  const required = [
+    "design.create",
+    "design.show",
+    "design.diff",
+    "design.status",
+    "design.validate",
+    "design.amend",
+    "design.submit",
+    "design.review",
+    "design.start",
+    "design.link",
+    "design.certify",
+    "design.rework",
+    "design.promote",
+    "design.recover",
+    "design.render",
+  ];
+  const actual = new Set((projection.commands ?? []).map((entry) => entry.id));
+  for (const commandId of required) {
+    if (!actual.has(commandId)) throw new Error(`Design CLI contract is missing ${commandId}`);
+  }
+}
+
 function main() {
   const distEntry = path.join(repoRoot, "dist", "index.js");
   if (!fs.existsSync(distEntry)) throw new Error("dist is missing; run pnpm run build before the package suite");
 
   validateWorkingSetQualityCorpus();
   validateNestedDesignTestDiscovery();
+  validateDesignCliContract();
 
   const packResult = run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"]);
   const packReport = JSON.parse(packResult.stdout);

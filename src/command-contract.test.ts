@@ -24,11 +24,38 @@ test("the command contract covers the supported Wabachi surface", () => {
       "architecture.example",
       "architecture.validate",
       "architecture.render",
+      "design.help",
+      "design.create",
+      "design.show",
+      "design.diff",
+      "design.status",
+      "design.validate",
+      "design.amend",
+      "design.submit",
+      "design.review",
+      "design.start",
+      "design.link",
+      "design.certify",
+      "design.rework",
+      "design.promote",
+      "design.recover",
+      "design.render",
       "skill.index",
       "skill.scenario",
     ],
   );
-  assert.deepEqual(Object.keys(COMMAND_OPTIONS).sort(), ["config", "help", "json", "out", "revision", "version"]);
+  assert.deepEqual(Object.keys(COMMAND_OPTIONS).sort(), [
+    "changeId",
+    "config",
+    "force",
+    "help",
+    "input",
+    "json",
+    "out",
+    "revision",
+    "section",
+    "version",
+  ]);
   assert.equal(
     commandUsage("architecture.validate"),
     "usage: wabachi architecture validate [file] [--help[=full|json]] [--json]",
@@ -62,7 +89,7 @@ test("progressive help resolves root, domain, and leaf projections", () => {
   assert.equal(root?.kind, "root");
   assert.deepEqual(
     root?.commands.map((entry) => entry.id),
-    ["root.version", "run.execute", "matrix.execute", "architecture.help", "skill.index"],
+    ["root.version", "run.execute", "matrix.execute", "architecture.help", "design.help", "skill.index"],
   );
 
   const domain = projectCommandHelp(["architecture"]);
