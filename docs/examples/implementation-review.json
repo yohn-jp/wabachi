@@ -8,9 +8,7 @@
     "repository": "yohn-jp/wabachi",
     "number": 1
   },
-  "targetEntryKeys": [
-    "[\"element\",\"example-service\"]"
-  ],
+  "targetEntryKeys": ["[\"element\",\"example-service\"]"],
   "evidence": [
     {
       "provider": "replace-with-provider",
