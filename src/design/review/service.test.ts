@@ -180,12 +180,57 @@ test("changes-requested records history and returns the lifecycle to draft", asy
         return revision === current.digest ? current : undefined;
       },
     },
+    reviewTransaction: {
+      async commit(evidence, lifecycle) {
+        await state.value.reviews.record(evidence);
+        await state.value.lifecycle.write(lifecycle);
+      },
+    },
   });
 
   const lifecycle = await service.recordReview(review(current, "changes-requested"));
   assert.equal(lifecycle.state, "draft");
   assert.equal((await state.value.reviews.list(current.changeId)).length, 2);
   await assert.rejects(service.assertImplementationAuthorized(current.changeId));
+});
+
+test("review mutation refuses a non-atomic persistence fallback", async () => {
+  const current = createDesignChangeSet(payload());
+  const state = ports(current, [review(current)]);
+  const service = new DesignReviewService(state.value, {
+    proposalRevisions: {
+      async read(_changeId, revision) {
+        return revision === current.digest ? current : undefined;
+      },
+    },
+  });
+
+  await assert.rejects(service.recordReview(review(current, "changes-requested")), (error: unknown) => {
+    return error instanceof DesignReviewError && error.code === "atomic-transaction-required";
+  });
+  assert.equal((await state.value.reviews.list(current.changeId)).length, 1);
+  assert.equal(state.lifecycle, undefined);
+});
+
+test("review mutation leaves no partial persistence when the transaction fails", async () => {
+  const current = createDesignChangeSet(payload());
+  const state = ports(current, [review(current)]);
+  const service = new DesignReviewService(state.value, {
+    proposalRevisions: {
+      async read(_changeId, revision) {
+        return revision === current.digest ? current : undefined;
+      },
+    },
+    reviewTransaction: {
+      async commit() {
+        throw new Error("transaction unavailable");
+      },
+    },
+  });
+
+  await assert.rejects(service.recordReview(review(current, "changes-requested")), /transaction unavailable/);
+  assert.equal((await state.value.reviews.list(current.changeId)).length, 1);
+  assert.equal(state.lifecycle, undefined);
 });
 
 test("approval fails closed when no immutable proposal revision reader is available", async () => {

@@ -25,11 +25,18 @@ export interface DesignAmendmentTransaction {
   commit(change: DesignChangeSet, lifecycle: DesignIntentLifecycleRecord, event: DesignChangeEvent): Promise<void>;
 }
 
+/** An adapter can persist review history and the resulting lifecycle record atomically. */
+export interface DesignReviewTransaction {
+  commit(evidence: DesignReviewEvidence, lifecycle: DesignIntentLifecycleRecord): Promise<void>;
+}
+
 export interface DesignReviewServiceOptions {
   /** Reads the immutable proposal bytes identified by review.proposalRevision. */
   readonly proposalRevisions?: ProposalRevisionReader;
   /** Persists an amendment and its AMEND event as one repository transaction. */
   readonly amendmentTransaction?: DesignAmendmentTransaction;
+  /** Persists review evidence and the resulting lifecycle record as one repository transaction. */
+  readonly reviewTransaction?: DesignReviewTransaction;
 }
 
 export interface ApprovalSelection {
@@ -120,10 +127,16 @@ export class DesignReviewService {
       );
     }
 
+    if (this.options.reviewTransaction === undefined) {
+      throw new DesignReviewError(
+        "atomic-transaction-required",
+        "review mutation requires an atomic review-history and lifecycle transaction",
+      );
+    }
+
     const previous = await this.ports.lifecycle.read(change.changeId);
     const lifecycle = this.lifecycleForReview(change, previous, evidence);
-    await this.ports.reviews.record(evidence);
-    await this.ports.lifecycle.write(lifecycle);
+    await this.options.reviewTransaction.commit(evidence, lifecycle);
     return lifecycle;
   }
 
