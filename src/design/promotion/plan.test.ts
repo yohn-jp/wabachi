@@ -4,6 +4,13 @@ import { createArchitectureDocument } from "../../architecture/canon/document.js
 import { serializeCanonicalArchitectureDocument } from "../../architecture/canon/codec.js";
 import { createSemanticEntryKey } from "../entry-key.js";
 import { digestJson, type Digest } from "../digest.js";
+import {
+  checkerResultDigest,
+  implementationLinkageDigest,
+  implementationSubjectDigest,
+  type CertificationRecord,
+  type GitImplementationSubject,
+} from "../certification/certify.js";
 import type {
   CanonRevisionReference,
   DesignChangeSet,
@@ -11,6 +18,12 @@ import type {
   RepositoryRevisionReference,
 } from "../contracts.js";
 import { preflightPromotion, type PromotionPreflightInput } from "./plan.js";
+
+const implementationSubject: GitImplementationSubject = {
+  path: "src/service.ts",
+  mode: "100644",
+  objectId: "git-object-1",
+};
 
 function canon(withElement = false) {
   return createArchitectureDocument({
@@ -87,11 +100,29 @@ function lifecycleFor(
       certificationId: "certification-1",
       changeId: change.changeId,
       changeDigest: change.digest,
+      proposalDigest: change.digest,
+      targetCanonDigest: change.target.targetCanonDigest,
+      linkageDigest: implementationLinkageDigest([
+        {
+          linkId: "link-1",
+          changeId: change.changeId,
+          changeDigest: change.digest,
+          implementation: {
+            repositoryHost: "github.com",
+            repositoryId: "repo-1",
+            number: 1,
+          },
+          targetEntryKeys: [change.target.operations[0].entryKey],
+        },
+      ]),
+      implementationSubjectDigest: implementationSubjectDigest([implementationSubject]),
+      checkerDigest: checkerResultDigest([{ checkId: "canon-valid", result: "match" }]),
+      implementationSubject: [implementationSubject],
       implementationRevision,
       result: "match",
       checks: [{ checkId: "canon-valid", result: "match" }],
       recordedAt: "2026-01-02T00:00:00.000Z",
-    },
+    } as CertificationRecord,
   };
 }
 
@@ -178,4 +209,25 @@ test("preflight does not invoke a writer or mutate supplied facts", () => {
   const result = preflightPromotion(value);
   assert.equal(result.ok, true);
   assert.equal(JSON.stringify(value), before);
+});
+
+test("promotion requires each independent certification digest binding", () => {
+  const value = input();
+  const fields = [
+    "proposalDigest",
+    "targetCanonDigest",
+    "linkageDigest",
+    "implementationSubjectDigest",
+    "checkerDigest",
+  ] as const;
+  for (const field of fields) {
+    const certification = { ...value.lifecycle.certification! } as Record<string, unknown>;
+    certification[field] = "f".repeat(64);
+    const result = preflightPromotion({
+      ...value,
+      lifecycle: { ...value.lifecycle, certification: certification as never },
+    });
+    assert.equal(result.ok, false, `expected ${field} mismatch to fail`);
+    if (!result.ok) assert.equal(result.failure.code, "stale-certification");
+  }
 });

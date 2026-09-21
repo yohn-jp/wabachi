@@ -2,6 +2,13 @@ import { decodeArchitectureDocument, serializeCanonicalArchitectureDocument } fr
 import type { ArchitectureDocumentV1 } from "../../architecture/canon/document.js";
 import { CANON_VERSION } from "../../architecture/canon/identity.js";
 import { canonicalizeJson, digestJson, type Digest } from "../digest.js";
+import {
+  checkerResultDigest,
+  implementationLinkageDigest,
+  implementationSubjectDigest,
+  type CertificationBindingDigests,
+  type GitImplementationSubject,
+} from "../certification/certify.js";
 import type {
   CanonRevisionReference,
   CertificationEvidence,
@@ -268,7 +275,7 @@ function validateInput(
     return failed("invalid-proposal", "proposal contains malformed or duplicate semantic operations");
   }
 
-  const lifecycleFailure = validateLifecycle(input, change);
+  const lifecycleFailure = validateLifecycle(input, change, target);
   if (lifecycleFailure !== undefined) return { failure: lifecycleFailure };
   const lifecycleBytes = canonicalizeJson(lifecycle);
   const implementationRevision = lifecycle.certification!.implementationRevision;
@@ -302,7 +309,11 @@ interface ValidatedPromotionInput {
   readonly lifecycleBytes: string;
 }
 
-function validateLifecycle(input: PromotionPreflightInput, change: DesignChangeSet): PromotionFailure | undefined {
+function validateLifecycle(
+  input: PromotionPreflightInput,
+  change: DesignChangeSet,
+  target: ArchitectureDocumentV1,
+): PromotionFailure | undefined {
   const lifecycle = input.lifecycle;
   if (lifecycle.changeId !== change.changeId || lifecycle.changeDigest !== change.digest) {
     return { code: "stale-certification", detail: "lifecycle record is not bound to the current proposal" };
@@ -344,7 +355,13 @@ function validateLifecycle(input: PromotionPreflightInput, change: DesignChangeS
   }
   if (
     certification.result !== "match" ||
-    !isUsableCertification(certification, input.requiredCheckIds, proposalTargets)
+    !isUsableCertification(
+      certification,
+      input.requiredCheckIds,
+      proposalTargets,
+      target,
+      lifecycle.implementations,
+    )
   ) {
     return { code: "stale-certification", detail: "certification is not a complete match for the current proposal" };
   }
@@ -384,6 +401,8 @@ function isUsableCertification(
   certification: CertificationEvidence,
   requiredCheckIds: readonly string[] | undefined,
   proposalTargets: ReadonlySet<string>,
+  target: ArchitectureDocumentV1,
+  links: readonly ImplementationLink[],
 ): boolean {
   if (
     typeof certification.certificationId !== "string" ||
@@ -411,14 +430,44 @@ function isUsableCertification(
     }
     ids.add(check.checkId);
   }
-  if (requiredCheckIds === undefined) return true;
-  if (!Array.isArray(requiredCheckIds) || requiredCheckIds.length !== ids.size) return false;
-  const expected = new Set<string>();
-  for (const id of requiredCheckIds) {
-    if (typeof id !== "string" || id.trim().length === 0 || expected.has(id) || !ids.has(id)) return false;
-    expected.add(id);
+  if (requiredCheckIds !== undefined) {
+    if (!Array.isArray(requiredCheckIds) || requiredCheckIds.length !== ids.size) return false;
+    const expected = new Set<string>();
+    for (const id of requiredCheckIds) {
+      if (typeof id !== "string" || id.trim().length === 0 || expected.has(id) || !ids.has(id)) return false;
+      expected.add(id);
+    }
+    if (expected.size !== ids.size) return false;
   }
-  return expected.size === ids.size;
+  const bound = certification as CertificationEvidence &
+    Partial<CertificationBindingDigests> & {
+      readonly implementationSubject?: readonly GitImplementationSubject[];
+    };
+  if (
+    bound.proposalDigest !== undefined &&
+    (typeof bound.proposalDigest !== "string" || bound.proposalDigest !== certification.changeDigest)
+  ) {
+    return false;
+  }
+  if (bound.proposalDigest === undefined || bound.targetCanonDigest === undefined) return false;
+  if (bound.targetCanonDigest !== digestJson(target)) return false;
+  if (bound.linkageDigest !== implementationLinkageDigest(links)) return false;
+  if (!Array.isArray(bound.implementationSubject)) return false;
+  if (bound.implementationSubject.some((entry) => !isGitImplementationSubject(entry))) return false;
+  if (bound.implementationSubjectDigest !== implementationSubjectDigest(bound.implementationSubject)) return false;
+  return bound.checkerDigest === checkerResultDigest(certification.checks);
+}
+
+function isGitImplementationSubject(value: unknown): value is GitImplementationSubject {
+  return (
+    isRecord(value) &&
+    typeof value.path === "string" &&
+    value.path.length > 0 &&
+    typeof value.mode === "string" &&
+    value.mode.length > 0 &&
+    typeof value.objectId === "string" &&
+    value.objectId.length > 0
+  );
 }
 
 function isUsableRevision(value: RepositoryRevisionReference): boolean {
