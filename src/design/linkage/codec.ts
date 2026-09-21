@@ -4,6 +4,12 @@ import type { Digest } from "../digest.js";
 
 type JsonRecord = Record<string, unknown>;
 
+// These are the representation-independent IssueReference constraints used by
+// Inari.  The repository name is only a current locator; the host/database ID
+// tuple remains the stable repository identity.
+const REPOSITORY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/u;
+const REPOSITORY_ID_PATTERN = /^[1-9][0-9]{0,19}$/u;
+
 /** The proposal identity a linkage must be attached to. */
 export type ProposalRevision =
   | Pick<DesignChangeSet, "changeId" | "digest">
@@ -67,21 +73,24 @@ function normalizeDigest(value: unknown, label: string): Digest {
 
 function normalizeRepositoryHost(value: unknown): string {
   const host = normalizeText(value, "implementation repositoryHost");
-  if (host.includes("/")) throw new TypeError("implementation repositoryHost is malformed");
-  return host;
+  if (/[\s\/]/u.test(host)) throw new TypeError("implementation repositoryHost is malformed");
+  return host.toLocaleLowerCase("en-US");
 }
 
 function normalizeRepositoryId(value: unknown): string {
-  return normalizeText(value, "implementation repositoryId");
+  const repositoryId = normalizeText(value, "implementation repositoryId");
+  if (!REPOSITORY_ID_PATTERN.test(repositoryId)) {
+    throw new TypeError("implementation repositoryId is malformed");
+  }
+  return repositoryId;
 }
 
 function normalizeRepositoryLocator(value: unknown): string {
   const repository = normalizeText(value, "implementation repository");
-  const separator = repository.indexOf("/");
-  if (separator <= 0 || separator === repository.length - 1 || repository.indexOf("/", separator + 1) !== -1) {
+  if (!REPOSITORY_PATTERN.test(repository)) {
     throw new TypeError("implementation repository must be an owner/name locator");
   }
-  return repository;
+  return repository.toLocaleLowerCase("en-US");
 }
 
 function normalizeIssueNumber(value: unknown): number {

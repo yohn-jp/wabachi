@@ -43,12 +43,42 @@ test("rejects invalid issue identity and imported authorization fields", () => {
   assert.throws(() => decodeExternalIssueReference({ ...link.implementation, number: 0 }), /positive safe integer/);
   assert.throws(() => decodeExternalIssueReference({ ...link.implementation, repositoryId: "" }), /malformed/);
   assert.throws(
+    () => decodeExternalIssueReference({ ...link.implementation, repositoryId: "123456789012345678901" }),
+    /malformed/,
+  );
+  assert.throws(
+    () => decodeExternalIssueReference({ ...link.implementation, repositoryHost: "github.com/path" }),
+    /malformed/,
+  );
+  assert.throws(
+    () => decodeExternalIssueReference({ ...link.implementation, repositoryHost: "github.com host" }),
+    /malformed/,
+  );
+  assert.throws(
     () => decodeExternalIssueReference({ ...link.implementation, repositoryId: 1335559861 }),
     /must be a string/,
   );
   assert.throws(() => decodeExternalIssueReference({ ...link.implementation, token: "secret" }), /unknown field/);
   assert.throws(() => decodeExternalIssueReference({ ...link.implementation, read: ["src"] }), /unknown field/);
   assert.throws(() => decodeExternalIssueReference({ ...link.implementation, write: ["src"] }), /unknown field/);
+});
+
+test("canonicalizes GitHub host and repository locator without changing identity", () => {
+  const reference = decodeExternalIssueReference({
+    ...link.implementation,
+    repositoryHost: "GITHUB.COM",
+    repository: "Yohn-JP/Wabachi",
+  });
+  assert.deepEqual(reference, {
+    repositoryHost: "github.com",
+    repositoryId: "1335559861",
+    repository: "yohn-jp/wabachi",
+    number: 210,
+  });
+  assert.deepEqual(decodeExternalIssueReference({ ...reference, repositoryHost: "ghe.example.com" }), {
+    ...reference,
+    repositoryHost: "ghe.example.com",
+  });
 });
 
 test("retains deleted proposal targets as canonical base EntryRefs", () => {
