@@ -239,8 +239,19 @@ function runInstalledDesignSmoke(packageDirectory, binDirectory, binName) {
       ["design", "certify", change.changeId, "--input", "certification.json", "--json"],
       designRepository,
     );
+    // Incomplete evidence fails closed at the certification result, not the
+    // process exit code: `design certify` still exits 0 and prints the
+    // derived CertificationEvidence so callers can inspect why the proof
+    // plan is unresolved.
+    let incompleteResult;
+    try {
+      incompleteResult = JSON.parse(incomplete.stdout);
+    } catch {
+      incompleteResult = undefined;
+    }
     if (
-      incomplete.status === 0 ||
+      incomplete.status !== 0 ||
+      incompleteResult?.certification?.result !== "unresolved" ||
       !/illegal lifecycle transition|unresolved|certification/u.test(incomplete.stdout + incomplete.stderr)
     ) {
       fail("installed Design certify did not fail closed for incomplete evidence");

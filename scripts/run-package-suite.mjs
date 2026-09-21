@@ -142,6 +142,7 @@ function main() {
   console.log(`package contents verified: ${packedFiles.length} file(s), all bin targets present and executable.`);
 
   run(process.execPath, ["scripts/smoke-test.mjs"], { stdio: "inherit" });
+  run(process.execPath, ["scripts/certify-design-dogfood.mjs"], { stdio: "inherit" });
 }
 
 main();

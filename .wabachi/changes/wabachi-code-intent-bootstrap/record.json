@@ -1,0 +1,798 @@
+{
+  "changeId": "wabachi-code-intent-bootstrap",
+  "changeDigest": "96fc21bcf24519976eefa7a59f9440741d54916885b5ccaac321bd265dcbf321",
+  "state": "promoted",
+  "review": {
+    "reviewId": "wabachi-code-intent-design-review",
+    "changeId": "wabachi-code-intent-bootstrap",
+    "proposalDigest": "96fc21bcf24519976eefa7a59f9440741d54916885b5ccaac321bd265dcbf321",
+    "proposalRevision": "cf14f5a5f09acc39ffbf603b0559e00004f4b263",
+    "decision": "approved",
+    "actor": "wabachi-dogfood-reviewer",
+    "reason": "Wabachi self-hosted review of the createArchitectureDocument Code Intent proposal",
+    "timestamp": "2026-09-21T00:00:00.000Z",
+    "evidence": [
+      {
+        "provider": "git",
+        "reference": "cf14f5a5f09acc39ffbf603b0559e00004f4b263:.wabachi/changes/wabachi-code-intent-bootstrap/change.json"
+      }
+    ]
+  },
+  "implementations": [
+    {
+      "linkId": "wabachi-code-intent-implementation",
+      "changeId": "wabachi-code-intent-bootstrap",
+      "changeDigest": "96fc21bcf24519976eefa7a59f9440741d54916885b5ccaac321bd265dcbf321",
+      "implementation": {
+        "repositoryHost": "github.com",
+        "repositoryId": "1335559861",
+        "repository": "yohn-jp/wabachi",
+        "number": 227
+      },
+      "targetEntryKeys": ["[\"code-intent\",\"create-architecture-document-intent\"]"],
+      "evidence": [
+        {
+          "provider": "git",
+          "reference": "cf14f5a5f09acc39ffbf603b0559e00004f4b263:src/architecture/canon/document.ts#createArchitectureDocument"
+        }
+      ]
+    }
+  ],
+  "certification": {
+    "certificationId": "wabachi-code-intent-certification",
+    "changeId": "wabachi-code-intent-bootstrap",
+    "changeDigest": "96fc21bcf24519976eefa7a59f9440741d54916885b5ccaac321bd265dcbf321",
+    "implementationRevision": {
+      "repository": "/tmp/wabachi-design-dogfood-ia66DF/repository",
+      "revision": "4de67471bd1bfc53f6723ae9a50fbb1fd6956c14"
+    },
+    "result": "match",
+    "checks": [
+      { "checkId": "canon-validity", "result": "match", "detail": "target Canon is valid" },
+      {
+        "checkId": "create-architecture-document-symbol",
+        "targetEntryKey": "[\"code-intent\",\"create-architecture-document-intent\",\"create-architecture-document-symbol\"]",
+        "result": "match",
+        "detail": "Code Intent symbol obligation: match"
+      },
+      {
+        "checkId": "design:[\"code-intent\",\"create-architecture-document-intent\"]",
+        "targetEntryKey": "[\"code-intent\",\"create-architecture-document-intent\"]",
+        "result": "match",
+        "detail": "Wabachi dogfood reviewer confirmed the realized Canon Code Intent change"
+      },
+      { "checkId": "linked-target-coverage", "result": "match", "detail": "all targets are covered" },
+      { "checkId": "source-revision-binding", "result": "match", "detail": "completion evidence is revision-bound" }
+    ],
+    "recordedAt": "2026-09-21T00:00:00.000Z",
+    "proposalDigest": "96fc21bcf24519976eefa7a59f9440741d54916885b5ccaac321bd265dcbf321",
+    "targetCanonDigest": "42f3eb7f6f1447f45814654b1b8f673959a4f890f6b05eae4a69645435d704d0",
+    "linkageDigest": "3c4b607f99bd77cac380594f941239444257af02a1ff1fc8330cac6b4ceccd0b",
+    "implementationSubjectDigest": "d640396b31d0ba70c79650b8198ef1ce9c2579dec828a7a9b01efd0525143f48",
+    "checkerDigest": "30bb89b3e585d2dca1d7ea5b53988d28ef004141f8a72bad7494726e8a91bbc5",
+    "implementationSubject": [
+      {
+        "path": "src/architecture/canon/authority.test.ts",
+        "mode": "100644",
+        "objectId": "0b1d558672f5290bb2bbb00cdc699f8b9740f278"
+      },
+      {
+        "path": "src/architecture/canon/authority.ts",
+        "mode": "100644",
+        "objectId": "4770ffe211c151c7cc919235d0b6c49326b34c58"
+      },
+      {
+        "path": "src/architecture/canon/boundaries.test.ts",
+        "mode": "100644",
+        "objectId": "5db2a9f89824ee88231842263ded0c604347b760"
+      },
+      {
+        "path": "src/architecture/canon/boundaries.ts",
+        "mode": "100644",
+        "objectId": "abcdd2442c6f5ac2ec5d295494ca31215313da95"
+      },
+      {
+        "path": "src/architecture/canon/code-intent-contract.ts",
+        "mode": "100644",
+        "objectId": "c62e1fc808c629d377c5abd243ee565ccb0495ea"
+      },
+      {
+        "path": "src/architecture/canon/code-intent-validation.test.ts",
+        "mode": "100644",
+        "objectId": "b2daa63797af7b93d6471c0f134d1bf970cd63df"
+      },
+      {
+        "path": "src/architecture/canon/code-intent-validation.ts",
+        "mode": "100644",
+        "objectId": "ae921e0a18fa69e0574a74caa6b4e77bbce5f1a3"
+      },
+      {
+        "path": "src/architecture/canon/code-intent.test.ts",
+        "mode": "100644",
+        "objectId": "1c919f7627b499a468fe98783f0442ca43cf30e2"
+      },
+      {
+        "path": "src/architecture/canon/code-intent.ts",
+        "mode": "100644",
+        "objectId": "a04b487dbdb76e3cf1213d49544d56973cbb89cb"
+      },
+      {
+        "path": "src/architecture/canon/codec.test.ts",
+        "mode": "100644",
+        "objectId": "bf792b76d2ac11f8fdec36c97c452ddfd2764ee8"
+      },
+      {
+        "path": "src/architecture/canon/codec.ts",
+        "mode": "100644",
+        "objectId": "e3a3ea78bc68bc4d8f1e8d612e7bffd3ef45e90c"
+      },
+      {
+        "path": "src/architecture/canon/constraints.test.ts",
+        "mode": "100644",
+        "objectId": "46b65106fa0e74c4a367455274bb897d2511813d"
+      },
+      {
+        "path": "src/architecture/canon/constraints.ts",
+        "mode": "100644",
+        "objectId": "a2f6633b16460cda5a9bc34dff4937634f69864d"
+      },
+      {
+        "path": "src/architecture/canon/decisions.test.ts",
+        "mode": "100644",
+        "objectId": "ff6d0049b4efedacbdbaad7af464f87341cb1ddc"
+      },
+      {
+        "path": "src/architecture/canon/decisions.ts",
+        "mode": "100644",
+        "objectId": "b75e74617a63c76206d88c09ed425ff7d7c6ec6a"
+      },
+      {
+        "path": "src/architecture/canon/deployment.test.ts",
+        "mode": "100644",
+        "objectId": "8ca7e532285f1f9b6c052a3b4e509c7bda598d43"
+      },
+      {
+        "path": "src/architecture/canon/deployment.ts",
+        "mode": "100644",
+        "objectId": "8e7e5a470a728bc7483e061caf851b7fe6f41c5d"
+      },
+      {
+        "path": "src/architecture/canon/document.test.ts",
+        "mode": "100644",
+        "objectId": "7723dbe112dc88b0bc7c51ba1382b3421e03bfcc"
+      },
+      {
+        "path": "src/architecture/canon/document.ts",
+        "mode": "100644",
+        "objectId": "2b3cd2a9870da194a07fd0ed9609c45a4b761a43"
+      },
+      {
+        "path": "src/architecture/canon/elements.test.ts",
+        "mode": "100644",
+        "objectId": "7d6be559d801d709c7abf3f95aca91f613c46bf7"
+      },
+      {
+        "path": "src/architecture/canon/elements.ts",
+        "mode": "100644",
+        "objectId": "155bc51e04bd62b685022a55b3fb10c3b0b28326"
+      },
+      {
+        "path": "src/architecture/canon/flows.test.ts",
+        "mode": "100644",
+        "objectId": "c2b71571ba4f4d06d4965a0ca2e9370fa9a56b85"
+      },
+      {
+        "path": "src/architecture/canon/flows.ts",
+        "mode": "100644",
+        "objectId": "1502cbbd265caa078b7618eb6a07001e8e5fa7e4"
+      },
+      {
+        "path": "src/architecture/canon/identity.test.ts",
+        "mode": "100644",
+        "objectId": "9e3e6b2b27e2259a9f809d087854e8c63250579d"
+      },
+      {
+        "path": "src/architecture/canon/identity.ts",
+        "mode": "100644",
+        "objectId": "8aead43552a5cd85cbdee5ee459f7749cdc7e3a2"
+      },
+      {
+        "path": "src/architecture/canon/relationships.test.ts",
+        "mode": "100644",
+        "objectId": "aad7c63839fad5e092f26612eaee1a212a97dd14"
+      },
+      {
+        "path": "src/architecture/canon/relationships.ts",
+        "mode": "100644",
+        "objectId": "6d3d09dd4b1d85ca55f329a3b1cadee37035a3c6"
+      },
+      {
+        "path": "src/architecture/canon/repository-mappings.test.ts",
+        "mode": "100644",
+        "objectId": "f08b8d8d8cef0dbf035f94f332e8304688dfa755"
+      },
+      {
+        "path": "src/architecture/canon/repository-mappings.ts",
+        "mode": "100644",
+        "objectId": "70419e3f452b65be74236e41f79f328511115994"
+      },
+      {
+        "path": "src/architecture/canon/responsibilities.test.ts",
+        "mode": "100644",
+        "objectId": "6d9a7f4a7f13c77573c87d76ddd3828d58f385d8"
+      },
+      {
+        "path": "src/architecture/canon/responsibilities.ts",
+        "mode": "100644",
+        "objectId": "570f5aaa5234f3e6be21958d2d7af5c879d07662"
+      },
+      {
+        "path": "src/architecture/canon/validate.test.ts",
+        "mode": "100644",
+        "objectId": "1144b37271a4c25c42bd837845ab09c78c57702c"
+      },
+      {
+        "path": "src/architecture/canon/validate.ts",
+        "mode": "100644",
+        "objectId": "1fc57b73ccf699856d8dddcfd0babeeae9814fff"
+      },
+      {
+        "path": "src/architecture/canon/views.test.ts",
+        "mode": "100644",
+        "objectId": "e3aa66f96b3c3868d631fb5024f6a12fdbd23859"
+      },
+      {
+        "path": "src/architecture/canon/views.ts",
+        "mode": "100644",
+        "objectId": "f0663cea0ff268eacdc28e5e74aff2fb16002832"
+      },
+      {
+        "path": "src/architecture/cli.test.ts",
+        "mode": "100644",
+        "objectId": "3b62e91f911f210530fa5b3313467b86fa088ab7"
+      },
+      { "path": "src/architecture/cli.ts", "mode": "100644", "objectId": "42eaa595049386bf289ab4b93be0b06d997437fe" },
+      {
+        "path": "src/architecture/documentation/html.test.ts",
+        "mode": "100644",
+        "objectId": "5f6df435ea064e79137e05f9e936ce25a156fadf"
+      },
+      {
+        "path": "src/architecture/documentation/html.ts",
+        "mode": "100644",
+        "objectId": "ca53f039672f1bc2b188e415ec96903821717d9a"
+      },
+      {
+        "path": "src/architecture/documentation/model.ts",
+        "mode": "100644",
+        "objectId": "45ea457314ffb7167606418c69fa67edc664d71d"
+      },
+      {
+        "path": "src/architecture/documentation/project.test.ts",
+        "mode": "100644",
+        "objectId": "9db7b73abffbceb07e864337461237ff0a77e590"
+      },
+      {
+        "path": "src/architecture/documentation/project.ts",
+        "mode": "100644",
+        "objectId": "c80ea86370db362fb1692b64a1e4ffd372e23867"
+      },
+      {
+        "path": "src/architecture/documentation/react-flow.test.ts",
+        "mode": "100644",
+        "objectId": "196119b645f837be30d32674a80a6c5ebe8ff4f8"
+      },
+      {
+        "path": "src/architecture/documentation/react-flow.ts",
+        "mode": "100644",
+        "objectId": "19d91986336399486d7314bcb9c7f46e129b3b1a"
+      },
+      {
+        "path": "src/architecture/documentation/site.test.ts",
+        "mode": "100644",
+        "objectId": "7700042df5532e7c18b1cda5cb659d821d4491ec"
+      },
+      {
+        "path": "src/architecture/documentation/site.ts",
+        "mode": "100644",
+        "objectId": "fbbc1ba9dc67b1fff8c974b4948178940136c55b"
+      },
+      {
+        "path": "src/architecture/dogfood.test.ts",
+        "mode": "100644",
+        "objectId": "b120538abf3624bb7786d977d70a8a93ec0530df"
+      },
+      {
+        "path": "src/architecture/projection/react-flow.test.ts",
+        "mode": "100644",
+        "objectId": "0cb3b1fbfd207eb256c94cba0e7c334efebc32d1"
+      },
+      {
+        "path": "src/architecture/projection/react-flow.ts",
+        "mode": "100644",
+        "objectId": "5c9978097140ec9c152eff65fd298cdb1040d098"
+      },
+      {
+        "path": "src/architecture/projection/structurizr-export.test.ts",
+        "mode": "100644",
+        "objectId": "b85ee0018ad9b104b51d01cc83e2a567ccc140f9"
+      },
+      {
+        "path": "src/architecture/projection/structurizr-export.ts",
+        "mode": "100644",
+        "objectId": "a9ec7df5ee38cd49b36e011283f3cbd2b7c4ce97"
+      },
+      {
+        "path": "src/architecture/projection/structurizr.test.ts",
+        "mode": "100644",
+        "objectId": "7e435d442ab5a101eaf4dd9793c7dbe0955b3c70"
+      },
+      {
+        "path": "src/architecture/projection/structurizr.ts",
+        "mode": "100644",
+        "objectId": "2479eff5fd7b2b391c58fa4b44ef11e4442837c5"
+      },
+      { "path": "src/cli.test.ts", "mode": "100644", "objectId": "a25016ff7a007364b02962227a36d559ae342e62" },
+      { "path": "src/cli.ts", "mode": "100644", "objectId": "50e0e31d75c9ba91b9f2342373b45a68fafea895" },
+      {
+        "path": "src/command-contract.test.ts",
+        "mode": "100644",
+        "objectId": "c57ad9949f0e6ff1271fe834c7a80bc014c6147f"
+      },
+      { "path": "src/command-contract.ts", "mode": "100644", "objectId": "e0b1d6bab4d0ee67e4c224ebb14be8cc68d6e993" },
+      {
+        "path": "src/design/application.test.ts",
+        "mode": "100644",
+        "objectId": "7dd0b3a6c9bc70fc442969ff7d43e563e1d93004"
+      },
+      { "path": "src/design/application.ts", "mode": "100644", "objectId": "e0ab849c4ab6191c9dd96e9db9937f62532a84ab" },
+      {
+        "path": "src/design/certification/certify.test.ts",
+        "mode": "100644",
+        "objectId": "5f696d7111ee407a465906e59acaf3f72b331199"
+      },
+      {
+        "path": "src/design/certification/certify.ts",
+        "mode": "100644",
+        "objectId": "925374eb6a092c49b3dcc081ad150803f5adbd8a"
+      },
+      {
+        "path": "src/design/certification/codec.test.ts",
+        "mode": "100644",
+        "objectId": "d4c2b6f385c6c981e0f84f1cf100e7d972f86a30"
+      },
+      {
+        "path": "src/design/certification/codec.ts",
+        "mode": "100644",
+        "objectId": "4b35f8202320770ab7153fe6ec8a096ea8c68d3e"
+      },
+      {
+        "path": "src/design/certification/evidence.test.ts",
+        "mode": "100644",
+        "objectId": "a60c9824ad35275ad685a5a4d76d7d822126e210"
+      },
+      {
+        "path": "src/design/certification/evidence.ts",
+        "mode": "100644",
+        "objectId": "e9921ff0e4bbdb30633fc6f792e934172d5f3552"
+      },
+      {
+        "path": "src/design/certification/machine-checks.test.ts",
+        "mode": "100644",
+        "objectId": "2e96da3d49b8b3aa0b5d1ea38036f88b7ff3c619"
+      },
+      {
+        "path": "src/design/certification/machine-checks.ts",
+        "mode": "100644",
+        "objectId": "bcea649519eefe885892206279994d8bbc01174a"
+      },
+      {
+        "path": "src/design/certification/plan.test.ts",
+        "mode": "100644",
+        "objectId": "43a9576f5b2dd23dbc6a80b96e3f20c814b51e67"
+      },
+      {
+        "path": "src/design/certification/plan.ts",
+        "mode": "100644",
+        "objectId": "361eb1beb0e241c50ce33753e7d90a856c251082"
+      },
+      {
+        "path": "src/design/change/apply.test.ts",
+        "mode": "100644",
+        "objectId": "b827b74a37a833aae605caef51be2f2031105af6"
+      },
+      {
+        "path": "src/design/change/apply.ts",
+        "mode": "100644",
+        "objectId": "fd4099b0115935c8d2b578c88c7843dc845bebb5"
+      },
+      {
+        "path": "src/design/change/canon-adapter.test.ts",
+        "mode": "100644",
+        "objectId": "24a3277fa8be074511f7e1c5180bd3ad89ea0bbd"
+      },
+      {
+        "path": "src/design/change/canon-adapter.ts",
+        "mode": "100644",
+        "objectId": "a0c6e1e016d8674a963eb1900e408f8abcc9044e"
+      },
+      {
+        "path": "src/design/change/codec.test.ts",
+        "mode": "100644",
+        "objectId": "f336f04f111124ae24acbfa5a602a333829ce347"
+      },
+      {
+        "path": "src/design/change/codec.ts",
+        "mode": "100644",
+        "objectId": "6d3f4ae39e3a541feef5d2ddb98ce8878b5de902"
+      },
+      {
+        "path": "src/design/change/diff.test.ts",
+        "mode": "100644",
+        "objectId": "70a0e91d06567ed1fe537529c4cddbdeeec2e17e"
+      },
+      { "path": "src/design/change/diff.ts", "mode": "100644", "objectId": "4467463eb233038ee7efeebf11ee23bfa32f7d49" },
+      {
+        "path": "src/design/change/identity.ts",
+        "mode": "100644",
+        "objectId": "ad72085718c95ecae39740d70e9bd0437375029a"
+      },
+      { "path": "src/design/cli.test.ts", "mode": "100644", "objectId": "1ef810f9b41af01c0c2065470e1c98baf0e8cb0d" },
+      { "path": "src/design/cli.ts", "mode": "100644", "objectId": "a61dfcd612e62c4f11cadaef58528b499facdd32" },
+      {
+        "path": "src/design/cli/arguments.test.ts",
+        "mode": "100644",
+        "objectId": "593484733356ae1a2d1ac55db452e0ee46cd8da1"
+      },
+      {
+        "path": "src/design/cli/arguments.ts",
+        "mode": "100644",
+        "objectId": "25e383994d1a148b9ca4d8131e3b5dbb4cf660bb"
+      },
+      {
+        "path": "src/design/cli/read.test.ts",
+        "mode": "100644",
+        "objectId": "eb98d8c6c7c1ad84a76526c865ec47019a2a1db5"
+      },
+      { "path": "src/design/cli/read.ts", "mode": "100644", "objectId": "0d4a9ba50a51916280215e4e8cc79b7d165f704e" },
+      { "path": "src/design/contracts.ts", "mode": "100644", "objectId": "4472e28d3c642817ace286ef8370b501edc5b208" },
+      { "path": "src/design/digest.test.ts", "mode": "100644", "objectId": "1ca5445ed6d8621d1b69167158e56e956d483eb8" },
+      { "path": "src/design/digest.ts", "mode": "100644", "objectId": "1dd1dcbc8b6261aa88ba15927311652b0ab79a1e" },
+      {
+        "path": "src/design/entry-key.test.ts",
+        "mode": "100644",
+        "objectId": "49e8cde8bc6a18d9cdf9e60a2f1fdb6f53907e3a"
+      },
+      { "path": "src/design/entry-key.ts", "mode": "100644", "objectId": "b3e8c42c2a891488714b08fbc3de91b82f943892" },
+      {
+        "path": "src/design/lifecycle/machine.test.ts",
+        "mode": "100644",
+        "objectId": "ec110a9dc0922778b18ede8221c017353395b352"
+      },
+      {
+        "path": "src/design/lifecycle/machine.ts",
+        "mode": "100644",
+        "objectId": "b1030546dfdb81bbb73113194e24e64ddc656215"
+      },
+      {
+        "path": "src/design/lifecycle/record.test.ts",
+        "mode": "100644",
+        "objectId": "35fcf8215459e0704231c9c9872173fbbef775a4"
+      },
+      {
+        "path": "src/design/lifecycle/record.ts",
+        "mode": "100644",
+        "objectId": "a46b55676ae000de7358e4766b8a8d26d6ca5533"
+      },
+      {
+        "path": "src/design/linkage/codec.test.ts",
+        "mode": "100644",
+        "objectId": "700195af25be1b4df6ed8824a8ce89e832be5a74"
+      },
+      {
+        "path": "src/design/linkage/codec.ts",
+        "mode": "100644",
+        "objectId": "e16a334480a36e39185113594ff9d5e351994ab8"
+      },
+      {
+        "path": "src/design/linkage/coverage.test.ts",
+        "mode": "100644",
+        "objectId": "71789b423f505862bdd89d1e6266281879d2e050"
+      },
+      {
+        "path": "src/design/linkage/coverage.ts",
+        "mode": "100644",
+        "objectId": "843d875336a5f449efa018de7fdd99fd7539e237"
+      },
+      { "path": "src/design/ports.ts", "mode": "100644", "objectId": "25c66c958e15e32f057731997f4c1acd15891480" },
+      {
+        "path": "src/design/projection/document.test.ts",
+        "mode": "100644",
+        "objectId": "df421d60f7156bad5300174ff2c15aea4d7eb63d"
+      },
+      {
+        "path": "src/design/projection/document.ts",
+        "mode": "100644",
+        "objectId": "8bba03380ec2628d31c3f1f53d90cdccabd6e6d6"
+      },
+      {
+        "path": "src/design/projection/graph-delta.test.ts",
+        "mode": "100644",
+        "objectId": "9fc104ed96befe2851bd2219df50edb9248e735c"
+      },
+      {
+        "path": "src/design/projection/graph-delta.ts",
+        "mode": "100644",
+        "objectId": "552d1b5119441ae1b42a83e174566b4e8baa4c5e"
+      },
+      {
+        "path": "src/design/projection/html.test.ts",
+        "mode": "100644",
+        "objectId": "2f629d81b7078b7a3fe568987f45b6a7d2ccbfd9"
+      },
+      {
+        "path": "src/design/projection/html.ts",
+        "mode": "100644",
+        "objectId": "2ed370c81fd4bd3796cfc170b5acb7a5729d627f"
+      },
+      {
+        "path": "src/design/projection/site.test.ts",
+        "mode": "100644",
+        "objectId": "260899170e26845a513f6321efbf4eedb84b8686"
+      },
+      {
+        "path": "src/design/projection/site.ts",
+        "mode": "100644",
+        "objectId": "13af7a2e3190b1203a8185176e65e5231dd60da9"
+      },
+      {
+        "path": "src/design/promotion/plan.test.ts",
+        "mode": "100644",
+        "objectId": "f15aa3426ae3802eeff8a84d3c2f73ee20715a57"
+      },
+      {
+        "path": "src/design/promotion/plan.ts",
+        "mode": "100644",
+        "objectId": "4b835a37cd9f5ec8fd801388bbe2beb6801abd40"
+      },
+      {
+        "path": "src/design/promotion/service.test.ts",
+        "mode": "100644",
+        "objectId": "fd51e5ef80768d3a7b961ffcab439da1fdfe3dfb"
+      },
+      {
+        "path": "src/design/promotion/service.ts",
+        "mode": "100644",
+        "objectId": "f1b7883d3385cb67d72063ede9b01a0242c6e6d4"
+      },
+      {
+        "path": "src/design/review/codec.test.ts",
+        "mode": "100644",
+        "objectId": "1af36979adf4c6c7e82226a550f34b31eb7eb3a3"
+      },
+      {
+        "path": "src/design/review/codec.ts",
+        "mode": "100644",
+        "objectId": "88e28711542b8678b1eb6603c96020bef8a1cec4"
+      },
+      {
+        "path": "src/design/review/service.test.ts",
+        "mode": "100644",
+        "objectId": "886db38dd4204efe0a90863d0ea9df56df78c213"
+      },
+      {
+        "path": "src/design/review/service.ts",
+        "mode": "100644",
+        "objectId": "c0b90a66591e5916aec92f2e6ea3ac12148cf613"
+      },
+      {
+        "path": "src/design/runtime.test.ts",
+        "mode": "100644",
+        "objectId": "a4da34fdc0611f497cc947757bbacdde79be9907"
+      },
+      { "path": "src/design/runtime.ts", "mode": "100644", "objectId": "1a03d215f9b2377a3464d2b26631b409ccc54360" },
+      {
+        "path": "src/design/storage/paths.test.ts",
+        "mode": "100644",
+        "objectId": "5a75bb2ef71231fc4227c98f6d383933f1f73a97"
+      },
+      {
+        "path": "src/design/storage/paths.ts",
+        "mode": "100644",
+        "objectId": "bc474709a393fac8b131c0d2255992582271d313"
+      },
+      {
+        "path": "src/design/storage/record-codec.test.ts",
+        "mode": "100644",
+        "objectId": "d8459d0cbef92d0ee8cba93cc259ac40836dcd37"
+      },
+      {
+        "path": "src/design/storage/record-codec.ts",
+        "mode": "100644",
+        "objectId": "a839d0afaa676855d0aed0f7c5193677f911b30a"
+      },
+      {
+        "path": "src/design/storage/revision.test.ts",
+        "mode": "100644",
+        "objectId": "44ffa6ffbcc9cfbfa8f7c72158f26a0cf507441d"
+      },
+      {
+        "path": "src/design/storage/revision.ts",
+        "mode": "100644",
+        "objectId": "25f52e22e6e7538eb789a1f5c3102e470f810cbb"
+      },
+      {
+        "path": "src/design/storage/store.test.ts",
+        "mode": "100644",
+        "objectId": "7ce19d4f0c233f81269493d3800606d686cc14f5"
+      },
+      {
+        "path": "src/design/storage/store.ts",
+        "mode": "100644",
+        "objectId": "52f9d573f6ccc8be38edbfb04144ee2420d9f35d"
+      },
+      {
+        "path": "src/design/storage/transaction.test.ts",
+        "mode": "100644",
+        "objectId": "e50945d56a0cbc8250a38295392d7c97a5047480"
+      },
+      {
+        "path": "src/design/storage/transaction.ts",
+        "mode": "100644",
+        "objectId": "c54d415fdef8e8688226fe1175b7cb0acb1ed43d"
+      },
+      { "path": "src/index.ts", "mode": "100644", "objectId": "d07e08b649e8a19cf3bdc84418bd8976123a77c6" },
+      {
+        "path": "src/runtime/correlation.test.ts",
+        "mode": "100644",
+        "objectId": "825542b23c3903fee8d3a31c1b35f25d5b13077e"
+      },
+      {
+        "path": "src/runtime/correlation.ts",
+        "mode": "100644",
+        "objectId": "ffc1cc6d9aa26fbb15926e2e6d7238093543f2bb"
+      },
+      { "path": "src/runtime/facts.test.ts", "mode": "100644", "objectId": "8176dcca0e927ae0c7de7c82a28b6640296e7e6b" },
+      { "path": "src/runtime/facts.ts", "mode": "100644", "objectId": "2b36c3069a2b1df454addea69151030bf58b39ee" },
+      {
+        "path": "src/runtime/fixtureProvider.ts",
+        "mode": "100644",
+        "objectId": "4894767d3458c9782ae944d9f2c7bb3fdca7b3ff"
+      },
+      {
+        "path": "src/runtime/fixtures/scip-sample/greeter.ts",
+        "mode": "100644",
+        "objectId": "49c939513792a9f4a739ed7d4b967ca129cd8322"
+      },
+      {
+        "path": "src/runtime/fixtures/scip-sample/package.json",
+        "mode": "100644",
+        "objectId": "07d9de43763b7ee4b640f445d33867de637ffc48"
+      },
+      {
+        "path": "src/runtime/fixtures/scip-sample/tsconfig.json",
+        "mode": "100644",
+        "objectId": "01e5cbe4b7df8fd7ddad3a188a8bef14302333d3"
+      },
+      {
+        "path": "src/runtime/graftProvider.test.ts",
+        "mode": "100644",
+        "objectId": "12485c8af948d0bd77a40d19c41cd9e24d6cc008"
+      },
+      {
+        "path": "src/runtime/graftProvider.ts",
+        "mode": "100644",
+        "objectId": "ed7f22d589c2971f8d116b3fd6f9eddae74b90c2"
+      },
+      {
+        "path": "src/runtime/graftWiring.ts",
+        "mode": "100644",
+        "objectId": "1e64db93a246e94feaf71358fe396b934ba5f296"
+      },
+      { "path": "src/runtime/manifest.ts", "mode": "100644", "objectId": "c9540ed9ecfd5b16c55154ed8125925d8dc4874a" },
+      {
+        "path": "src/runtime/matrix.test.ts",
+        "mode": "100644",
+        "objectId": "233b16d8dab4f8ce2b582483329cc7d7dc27d6c0"
+      },
+      { "path": "src/runtime/matrix.ts", "mode": "100644", "objectId": "198e886b0acbea9d1ee14ce8fa31c85c7fd2dd85" },
+      {
+        "path": "src/runtime/observation.ts",
+        "mode": "100644",
+        "objectId": "121131716b7c07974fe28ed51493056404422763"
+      },
+      { "path": "src/runtime/provider.ts", "mode": "100644", "objectId": "ff7dddf6bf0e77fe1ba87366cc1d9a3df22e43da" },
+      {
+        "path": "src/runtime/repository.test.ts",
+        "mode": "100644",
+        "objectId": "d105b46d13d83b3f009ceafef3e463a42b7e0550"
+      },
+      { "path": "src/runtime/repository.ts", "mode": "100644", "objectId": "7f445b688cd566561ecf113531f3bbd61104e3de" },
+      { "path": "src/runtime/run.test.ts", "mode": "100644", "objectId": "941fb266e3a1a9a3019410bd1c5e4dcd766b0193" },
+      { "path": "src/runtime/run.ts", "mode": "100644", "objectId": "74be6c1c01cf8fd16937842f0181232c7c97d51f" },
+      {
+        "path": "src/runtime/scipProvider.test.ts",
+        "mode": "100644",
+        "objectId": "7dabdcc5822e18d2986c84fbc91407275f32dc72"
+      },
+      {
+        "path": "src/runtime/scipProvider.ts",
+        "mode": "100644",
+        "objectId": "960f06a67b22c5f0f0bb16787bf81d2d3cc960c5"
+      },
+      {
+        "path": "src/runtime/typescriptProvider.test.ts",
+        "mode": "100644",
+        "objectId": "c32798ff319540e248e2dcfc7d75efa48396e9b7"
+      },
+      {
+        "path": "src/runtime/typescriptProvider.ts",
+        "mode": "100644",
+        "objectId": "89134cd3388531d155f56eab9b15a2086bee31b4"
+      },
+      {
+        "path": "src/runtime/vendor/scipTypescriptSchema.d.ts",
+        "mode": "100644",
+        "objectId": "b0c11115769a725140c9039128682c1624df201d"
+      },
+      {
+        "path": "src/runtime/workflow.test.ts",
+        "mode": "100644",
+        "objectId": "4f903e38892f7eef7c371097c9336b7eb4b928e9"
+      },
+      { "path": "src/runtime/workflow.ts", "mode": "100644", "objectId": "163b5add62fb0bb50c1487cc0a2589a377d64800" },
+      { "path": "src/skill.test.ts", "mode": "100644", "objectId": "b1f9daeef18a485a2be91650c808472edf8a7e8e" },
+      { "path": "src/skill.ts", "mode": "100644", "objectId": "ef1b15aa97aa481bb4322c7e223f6a1b56461a04" },
+      {
+        "path": "src/working-set/codec.test.ts",
+        "mode": "100644",
+        "objectId": "7b2c00870fb9ca51bccc8fff4603a73b2a859115"
+      },
+      { "path": "src/working-set/codec.ts", "mode": "100644", "objectId": "fa17ddcb012d4a4a5826d1a7b2df68a3c9c194b7" },
+      {
+        "path": "src/working-set/conflicts.test.ts",
+        "mode": "100644",
+        "objectId": "8041e73d803eff3f0df4dbace4f7ac86aca75ec2"
+      },
+      {
+        "path": "src/working-set/conflicts.ts",
+        "mode": "100644",
+        "objectId": "431ad0b2b5fda40632ed1eca2f985323e54c3a84"
+      },
+      {
+        "path": "src/working-set/derive.test.ts",
+        "mode": "100644",
+        "objectId": "76030ef87dc4e5c09c9cfafc70efad2dd96cefc8"
+      },
+      { "path": "src/working-set/derive.ts", "mode": "100644", "objectId": "79713ed85ae7097e772868317605a01c29da7b2e" },
+      {
+        "path": "src/working-set/fixtures/quality-corpus-v1.json",
+        "mode": "100644",
+        "objectId": "ad3b2aa32baa9a4c8f037462f38321c57113d997"
+      },
+      { "path": "src/working-set/index.ts", "mode": "100644", "objectId": "53fa1b0405610ca92844909b7ff7ce2e18a87415" },
+      {
+        "path": "src/working-set/model.test.ts",
+        "mode": "100644",
+        "objectId": "95c0a9e785a51d67782c33908f108845c671d55d"
+      },
+      { "path": "src/working-set/model.ts", "mode": "100644", "objectId": "91dfd290022bcb68f7100e8e05267aa66fe32bef" },
+      {
+        "path": "src/working-set/quality.test.ts",
+        "mode": "100644",
+        "objectId": "0378c984ad0be562ba394dfe00d4f577f9dad7b2"
+      },
+      {
+        "path": "src/working-set/quality.ts",
+        "mode": "100644",
+        "objectId": "9ebc43b2061ccdfedd895779dedc3a53d3cc3a20"
+      },
+      {
+        "path": "src/working-set/seeds.test.ts",
+        "mode": "100644",
+        "objectId": "40d643c2ed42b38f9a57763cd32b707895d15d9e"
+      },
+      { "path": "src/working-set/seeds.ts", "mode": "100644", "objectId": "45c214662338bace867666a6b548b7981dcc94b3" }
+    ]
+  }
+}
