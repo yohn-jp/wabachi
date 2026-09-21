@@ -3,3 +3,10 @@
 # dependency of tsx) is a known-safe, widely used build tool.
 allowBuilds:
   esbuild: true
+
+# Dependency pins that intentionally lag "latest" (see package.json):
+# - typescript: held at ^6.0.3. 7.x replaced the default export with a
+#   version-only stub (exports map "." -> lib/version.cjs) and moved the
+#   Compiler API (ts.SyntaxKind, ts.isClassDeclaration, ts.forEachChild, ...)
+#   behind a different entry point. src/runtime/typescriptProvider.ts uses
+#   that API directly, so bumping to 7.x needs a rewrite, not a version bump.
