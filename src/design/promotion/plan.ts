@@ -1,6 +1,7 @@
 import { decodeArchitectureDocument, serializeCanonicalArchitectureDocument } from "../../architecture/canon/codec.js";
 import type { ArchitectureDocumentV1 } from "../../architecture/canon/document.js";
 import { CANON_VERSION } from "../../architecture/canon/identity.js";
+import { createHash } from "node:crypto";
 import { canonicalizeJson, digestJson, type Digest } from "../digest.js";
 import {
   checkerResultDigest,
@@ -13,11 +14,14 @@ import type {
   CanonRevisionReference,
   CertificationEvidence,
   DesignChangeSet,
+  DesignChangeLifecycleState,
   DesignIntentLifecycleRecord,
   DesignReviewEvidence,
   ImplementationLink,
+  MachineTransitionResult,
   RepositoryRevisionReference,
 } from "../contracts.js";
+import type { FileDigest } from "../storage/transaction.js";
 
 /** Version of the deterministic promotion write-plan shape. */
 export const PROMOTION_PLAN_VERSION = 1 as const;
@@ -45,8 +49,14 @@ export interface CurrentCanonSnapshot {
   readonly revision: CanonRevisionReference;
   readonly document: ArchitectureDocumentV1;
   /** Existing bytes are retained as the CAS preimage; they are never rewritten by preflight. */
-  readonly bytes?: string;
+  readonly bytes?: StoredBytes;
 }
+
+/** Exact UTF-8 bytes retained from a repository artifact. */
+export type StoredBytes = string | Uint8Array;
+
+/** Result returned by the lifecycle MachinePort for the PROMOTE event. */
+export type PromotionTransitionResult = MachineTransitionResult | DesignChangeLifecycleState;
 
 export interface PromotionPreflightInput {
   readonly current: CurrentCanonSnapshot;
@@ -54,6 +64,12 @@ export interface PromotionPreflightInput {
   readonly lifecycle: DesignIntentLifecycleRecord;
   /** The exact Canon document certified by the certification record. */
   readonly certifiedTarget: ArchitectureDocumentV1;
+  /** Exact certified target bytes, when the certification provider supplies them. */
+  readonly certifiedTargetBytes?: StoredBytes;
+  /** A successful XState/MachinePort PROMOTE result. Required for certification-review input. */
+  readonly promotionTransition?: PromotionTransitionResult;
+  /** Exact stored lifecycle bytes retained for the lifecycle CAS preimage. */
+  readonly lifecycleBytes?: StoredBytes;
   /** Optional repository revision assertion for freshness checking. */
   readonly implementationRevision?: RepositoryRevisionReference;
   /** Optional frozen set of proof IDs; when supplied, the certification must match it exactly. */
@@ -62,21 +78,21 @@ export interface PromotionPreflightInput {
 
 export interface PromotionCasPreimage {
   readonly kind: "current-canon" | "lifecycle-record";
-  readonly bytes: string;
-  readonly digest: Digest;
+  readonly bytes: StoredBytes;
+  readonly digest: FileDigest;
 }
 
 export interface CurrentCanonMutation {
   readonly kind: "current-canon";
-  readonly bytes: string;
-  readonly expectedDigest: Digest;
+  readonly bytes: StoredBytes;
+  readonly expectedDigest: FileDigest;
   readonly nextDigest: Digest;
 }
 
 export interface LifecycleRecordMutation {
   readonly kind: "lifecycle-record";
-  readonly bytes: string;
-  readonly expectedDigest: Digest;
+  readonly bytes: StoredBytes;
+  readonly expectedDigest: FileDigest;
   readonly record: DesignIntentLifecycleRecord;
 }
 
@@ -109,7 +125,7 @@ export interface PromotionWritePlan {
   readonly changeDigest: Digest;
   readonly previousCurrent: CanonRevisionReference;
   readonly nextCurrent: CanonRevisionReference;
-  readonly nextCurrentCanonBytes: string;
+  readonly nextCurrentCanonBytes: StoredBytes;
   readonly nextLifecycle: DesignIntentLifecycleRecord;
   readonly receipt: PromotionReceipt;
   /** CAS preimages are kept separate from post-image mutations. */
@@ -173,13 +189,13 @@ export function preflightPromotion(input: PromotionPreflightInput): PromotionPre
     const currentMutation: CurrentCanonMutation = Object.freeze({
       kind: "current-canon",
       bytes: targetBytes,
-      expectedDigest: current.revision.canonDigest,
+      expectedDigest: digestBytes(currentBytes),
       nextDigest: nextCurrentDigest,
     });
     const lifecycleMutation: LifecycleRecordMutation = Object.freeze({
       kind: "lifecycle-record",
       bytes: promotedLifecycleBytes,
-      expectedDigest: digestJson(lifecycle),
+      expectedDigest: digestBytes(lifecycleBytes),
       record: promotedLifecycle,
     });
     const receiptMutation: PromotionReceiptMutation = Object.freeze({
@@ -189,8 +205,8 @@ export function preflightPromotion(input: PromotionPreflightInput): PromotionPre
       receipt,
     });
     const preimages: readonly PromotionCasPreimage[] = Object.freeze([
-      Object.freeze({ kind: "current-canon" as const, bytes: currentBytes, digest: current.revision.canonDigest }),
-      Object.freeze({ kind: "lifecycle-record" as const, bytes: lifecycleBytes, digest: digestJson(lifecycle) }),
+      Object.freeze({ kind: "current-canon" as const, bytes: currentBytes, digest: digestBytes(currentBytes) }),
+      Object.freeze({ kind: "lifecycle-record" as const, bytes: lifecycleBytes, digest: digestBytes(lifecycleBytes) }),
     ]);
 
     return {
@@ -248,7 +264,7 @@ function validateInput(
   const currentDocument = decodeDocument(current.document, "current Canon");
   const target = decodeDocument(input.certifiedTarget, "certified target Canon");
   const currentBytes = readCanonBytes(current.bytes, currentDocument, "current Canon");
-  const targetBytes = serializeCanonicalArchitectureDocument(target);
+  const targetBytes = readCanonBytes(input.certifiedTargetBytes, target, "certified target Canon");
 
   if (change.contractVersion !== 1) {
     return failed("unsupported-schema", "proposal uses an unsupported Design Change contract schema");
@@ -277,7 +293,8 @@ function validateInput(
 
   const lifecycleFailure = validateLifecycle(input, change, target);
   if (lifecycleFailure !== undefined) return { failure: lifecycleFailure };
-  const lifecycleBytes = canonicalizeJson(lifecycle);
+  const lifecycleBytes = input.lifecycleBytes === undefined ? canonicalizeJson(lifecycle) : input.lifecycleBytes;
+  validateStoredJsonBytes(lifecycleBytes, canonicalizeJson(lifecycle), "lifecycle record");
   const implementationRevision = lifecycle.certification!.implementationRevision;
   if (
     input.implementationRevision !== undefined &&
@@ -304,9 +321,9 @@ interface ValidatedPromotionInput {
   readonly change: DesignChangeSet;
   readonly lifecycle: DesignIntentLifecycleRecord;
   readonly target: ArchitectureDocumentV1;
-  readonly currentBytes: string;
-  readonly targetBytes: string;
-  readonly lifecycleBytes: string;
+  readonly currentBytes: StoredBytes;
+  readonly targetBytes: StoredBytes;
+  readonly lifecycleBytes: StoredBytes;
 }
 
 function validateLifecycle(
@@ -318,8 +335,18 @@ function validateLifecycle(
   if (lifecycle.changeId !== change.changeId || lifecycle.changeDigest !== change.digest) {
     return { code: "stale-certification", detail: "lifecycle record is not bound to the current proposal" };
   }
-  if (lifecycle.state !== "certification-review") {
-    return { code: "stale-certification", detail: "promotion requires certification-review lifecycle state" };
+  if (lifecycle.state === "certification-review") {
+    if (!isSuccessfulPromotionTransition(input.promotionTransition)) {
+      return {
+        code: "stale-certification",
+        detail: "promotion requires a successful XState PROMOTE transition result",
+      };
+    }
+  } else if (lifecycle.state !== "promoted") {
+    return {
+      code: "stale-certification",
+      detail: "promotion requires certification-review or promoted lifecycle state",
+    };
   }
   const review = lifecycle.review;
   if (!isCurrentReview(review, change)) {
@@ -486,14 +513,46 @@ function decodeDocument(value: unknown, label: string): ArchitectureDocumentV1 {
   }
 }
 
-function readCanonBytes(value: string | undefined, document: ArchitectureDocumentV1, label: string): string {
-  if (value === undefined) return serializeCanonicalArchitectureDocument(document);
-  if (typeof value !== "string") throw new TypeError(`${label} bytes must be a string`);
-  const decoded = decodeDocument(JSON.parse(value) as unknown, `${label} bytes`);
+function bytes(value: StoredBytes): Uint8Array {
+  return typeof value === "string" ? Buffer.from(value, "utf8") : new Uint8Array(value);
+}
+
+function digestBytes(value: StoredBytes): FileDigest {
+  return createHash("sha256").update(bytes(value)).digest("hex");
+}
+
+function readCanonBytes(value: StoredBytes | undefined, document: ArchitectureDocumentV1, label: string): StoredBytes {
+  const result = value === undefined ? serializeCanonicalArchitectureDocument(document) : value;
+  validateStoredCanonBytes(result, document, label);
+  return result;
+}
+
+function validateStoredCanonBytes(value: StoredBytes, document: ArchitectureDocumentV1, label: string): void {
+  const raw = bytes(value);
+  let decoded: ArchitectureDocumentV1;
+  try {
+    decoded = decodeDocument(JSON.parse(Buffer.from(raw).toString("utf8")) as unknown, `${label} bytes`);
+  } catch (error) {
+    throw new Error(`${label} bytes are invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
   if (serializeCanonicalArchitectureDocument(decoded) !== serializeCanonicalArchitectureDocument(document)) {
     throw new Error(`${label} bytes do not contain the supplied Canon document`);
   }
-  return value;
+}
+
+function validateStoredJsonBytes(value: StoredBytes, expectedCanonical: string, label: string): void {
+  let actualCanonical: string;
+  try {
+    actualCanonical = canonicalizeJson(JSON.parse(Buffer.from(bytes(value)).toString("utf8")));
+  } catch (error) {
+    throw new Error(`${label} bytes are invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (actualCanonical !== expectedCanonical) throw new Error(`${label} bytes do not contain the supplied record`);
+}
+
+function isSuccessfulPromotionTransition(value: PromotionTransitionResult | undefined): boolean {
+  if (value === "promoted") return true;
+  return isRecord(value) && value.state === "promoted";
 }
 
 function isCurrentChangeDigestValid(change: DesignChangeSet): boolean {
