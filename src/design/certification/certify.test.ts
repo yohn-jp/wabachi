@@ -170,3 +170,9 @@ test("missing Git implementation subject cannot produce a successful certificati
   assert.equal(result.result, "unresolved");
   assert.ok(result.checks.some((entry) => entry.checkId === "implementation-subject-binding"));
 });
+
+test("malformed Git implementation subject fails closed", () => {
+  const result = aggregateCertification(input({ implementationSubject: [null as never] }));
+  assert.equal(result.result, "unresolved");
+  assert.ok(result.checks.some((entry) => entry.checkId === "implementation-subject-binding"));
+});

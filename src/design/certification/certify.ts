@@ -164,11 +164,24 @@ function implementationSubjectKey(value: GitImplementationSubject): string {
   return JSON.stringify([value.path, value.mode, value.objectId]);
 }
 
+function normalizeSubject(value: unknown): GitImplementationSubject {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return { path: "", mode: "", objectId: "" };
+  }
+  const candidate = value as { readonly path?: unknown; readonly mode?: unknown; readonly objectId?: unknown };
+  return {
+    path: typeof candidate.path === "string" ? candidate.path : "",
+    mode: typeof candidate.mode === "string" ? candidate.mode : "",
+    objectId: typeof candidate.objectId === "string" ? candidate.objectId : "",
+  };
+}
+
 function sortedSubjects(
   supplied: GitImplementationSubject | readonly GitImplementationSubject[] | undefined,
 ): readonly GitImplementationSubject[] {
   const values = supplied === undefined ? [] : Array.isArray(supplied) ? supplied : [supplied];
-  return [...values].sort((left, right) =>
+  const normalized = values.map(normalizeSubject);
+  return normalized.sort((left, right) =>
     compareOrdinal(implementationSubjectKey(left), implementationSubjectKey(right)),
   );
 }
@@ -381,6 +394,9 @@ export function aggregateCertification(input: CertificationAggregationInput): Ce
   );
   if (invalidLinks.length > 0) {
     checks.push(check("linked-target-coverage", "unresolved", "one or more Implementation links are stale"));
+  }
+  if (input.change !== undefined && input.change.digest !== plan.changeDigest) {
+    checks.push(check("proposal-binding", "unresolved", "Design Change digest does not match the proof plan"));
   }
   const hasTargetBinding =
     input.targetCanonDigest !== undefined ||
