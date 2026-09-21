@@ -5,6 +5,7 @@ import type {
   DocumentationModel,
   DocumentationSection,
   DocumentationNavigationItem,
+  DocumentationDesignIntent,
 } from "./model.js";
 
 const HTML_ESCAPE_PATTERN = /[&<>"']/g;
@@ -139,6 +140,36 @@ ${section.groups.map((group) => renderGroup(section, group, anchoredCanonIds)).j
 </section>`;
 }
 
+function renderEvidence(label: string, value: unknown): string {
+  if (value === undefined) {
+    return `<p class="documentation-evidence documentation-evidence-missing"><strong>${escapeHtml(label)}</strong>: missing</p>`;
+  }
+  return `<div class="documentation-evidence"><h3>${escapeHtml(label)}</h3>${renderValue(value)}</div>`;
+}
+
+function renderDesignIntentContext(context: DocumentationDesignIntent): string {
+  const lifecycle = context.lifecycle;
+  const changeId = lifecycle?.changeId ?? "unbound";
+  const changeDigest = lifecycle?.changeDigest ?? "unbound";
+  const proposed =
+    context.proposed === undefined
+      ? `<p class="documentation-evidence documentation-evidence-missing"><strong>proposed</strong>: missing</p>`
+      : `<p class="documentation-evidence"><strong>proposed</strong>: ${escapeHtml(context.proposed.documentId)}</p>`;
+
+  return `<section id="section-design-intent">
+<h2>design intent</h2>
+<dl>
+<div><dt>changeId</dt><dd>${renderPrimitive(changeId)}</dd></div>
+<div><dt>changeDigest</dt><dd>${renderPrimitive(changeDigest)}</dd></div>
+<div><dt>state</dt><dd>${renderPrimitive(lifecycle?.state ?? "missing")}</dd></div>
+</dl>
+${proposed}
+${renderEvidence("review", lifecycle?.review)}
+${renderEvidence("implementations", lifecycle?.implementations)}
+${renderEvidence("certification", lifecycle?.certification)}
+</section>`;
+}
+
 /** Render the documentation projection as deterministic, safe static HTML. */
 export function renderDocumentationHtml(model: DocumentationModel): string {
   const rootId = canonAnchorId(model.root.canonId);
@@ -165,6 +196,7 @@ ${metadata}
 ${renderNavigation(model.navigation)}
 <main id="documentation">
 ${model.sections.map((section) => renderSection(section, anchoredCanonIds)).join("\n")}
+${model.designIntent === undefined ? "" : renderDesignIntentContext(model.designIntent)}
 </main>
 </body>
 </html>`;
