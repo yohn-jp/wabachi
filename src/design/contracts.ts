@@ -127,6 +127,44 @@ export interface DesignIntentLifecycleRecord {
   readonly certification?: CertificationEvidence;
 }
 
+/**
+ * The immutable event facts supplied to the lifecycle machine. The replay
+ * record keeps its richer event-kind union, while the shared machine boundary
+ * depends only on these transport-neutral fields.
+ */
+export interface MachineTransitionEvent {
+  readonly changeId: string;
+  readonly sequence: number;
+  readonly previousEventDigest: Digest;
+  readonly recordedAt: string;
+  readonly kind?: string;
+  readonly type?: string;
+  readonly event?: string;
+  readonly payload?: JsonValue;
+  readonly eventDigest: Digest;
+}
+
+/** Facts supplied to the sole lifecycle transition authority. */
+export interface MachineTransitionContext {
+  readonly changeId: string;
+  readonly proposalDigest: Digest;
+  /** Immutable Git revision resolved for the current proposal, when available. */
+  readonly proposalRevision?: string;
+  readonly review?: DesignReviewEvidence;
+  readonly implementations: readonly ImplementationLink[];
+  readonly certification?: CertificationEvidence;
+}
+
+export interface MachineTransitionRequest {
+  readonly state: DesignChangeLifecycleState;
+  readonly event: MachineTransitionEvent;
+  readonly context: MachineTransitionContext;
+}
+
+export interface MachineTransitionResult {
+  readonly state: DesignChangeLifecycleState;
+}
+
 export type DesignChangeSection = CanonSectionName | "codeIntent";
 
 export interface DesignIntentCanonView {
