@@ -103,6 +103,35 @@ test("renders hierarchy, labels, routed direction, and Canon/view identities", (
   assert.match(result.markup, /class="react-flow__edge-text"[^>]*>calls<\/text>/);
   assert.match(result.markup, /class="wabachi-react-flow-node wabachi-react-flow-node--parent"[^>]*>orders<\/div>/);
   assert.doesNotMatch(result.markup, /<svg class="wabachi-react-flow-canvas"/u);
+  assert.doesNotMatch(result.markup, /data-delta-state=/u);
+});
+
+test("renders optional semantic delta annotations without changing unannotated output", () => {
+  const source = projection();
+  const annotatedNodes = source.nodes.map((node) => ({
+    ...node,
+    data: { ...node.data, deltaState: node.data.canonId === "orders" ? "modified" : "unchanged" },
+  }));
+  const annotatedEdges = source.edges.map((edge) => ({
+    ...edge,
+    data: { ...edge.data, deltaState: "removed" },
+  }));
+  const annotatedView = {
+    ...source.views[0],
+    nodes: annotatedNodes,
+    edges: annotatedEdges,
+  };
+  const result = renderReactFlowStatic({
+    ...source,
+    nodes: annotatedNodes,
+    edges: annotatedEdges,
+    views: [annotatedView],
+  });
+
+  assert.match(result.markup, /data-delta-state="modified"/u);
+  assert.match(result.markup, /data-delta-state="removed"/u);
+  assert.match(result.markup, /wabachi-react-flow-node--delta-modified/u);
+  assert.match(result.markup, /wabachi-react-flow-edge--delta-removed/u);
 });
 
 test("renders equivalent projection data deterministically and keeps assets offline", () => {
