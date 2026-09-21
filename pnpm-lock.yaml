@@ -25,6 +25,9 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
     devDependencies:
       "@types/node":
         specifier: ^26.5.1
@@ -932,6 +935,10 @@ packages:
     engines: { node: ">= 8" }
     hasBin: true
 
+  xstate@5.33.2:
+    resolution:
+      { integrity: sha512-8tC7yXgeCvpT8gKEeEje6ikJJG1wpnoLiXe+HfECW8m10ubMd3QxKOwWA8KxPJVBcLwfdRoMKYxIBGYKmo37/A== }
+
   word-wrap@1.2.5:
     resolution:
       { integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA== }
@@ -1641,6 +1648,8 @@ snapshots:
   which@2.0.2:
     dependencies:
       isexe: 2.0.0
+
+  xstate@5.33.2: {}
 
   word-wrap@1.2.5: {}
 
