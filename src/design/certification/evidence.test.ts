@@ -64,3 +64,17 @@ test("keeps missing tree paths unresolved when the tree is partial", () => {
   assert.equal(evidence.treeCompleteness, "partial");
   assert.deepEqual(evidence.treePaths, ["src/other.ts"]);
 });
+
+test("does not admit a result-shaped record without repository evidence", () => {
+  const forged = admitRepositoryEvidence({
+    accepted: true,
+    repository: revision,
+    providers: [provider],
+    facts: [],
+    rejectedFacts: [],
+    factsCompleteness: "complete",
+    reasons: [],
+  });
+  assert.equal(forged.accepted, false);
+  assert.match(forged.reasons.join("; "), /repository evidence is required/);
+});

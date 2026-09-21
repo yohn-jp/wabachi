@@ -323,6 +323,7 @@ export function admitRepositoryEvidence(input: RepositoryEvidenceInput | unknown
       ? "partial"
       : tree.completeness;
   if (record === undefined || derivedRepository === undefined) reasons.push("repository revision is required");
+  if (rawFacts.length === 0 && tree === undefined) reasons.push("repository evidence is required");
   if (rejectedFacts.length > 0) reasons.push(`${rejectedFacts.length} fact record(s) were rejected`);
   const providers = [...new Map(facts.map((fact) => [providerKey(fact.provider), fact.provider])).values()].sort(
     compareProviders,
