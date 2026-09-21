@@ -192,6 +192,7 @@ test("Wave 1A production composition connects diff/apply, lifecycle replay/amend
       certification: certification.evidence,
     },
     certifiedTarget: target,
+    promotionTransition: { state: "promoted" },
     implementationRevision,
   });
   assert.equal(promotion.ok, true);

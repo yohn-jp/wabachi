@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { createArchitectureDocument } from "../../architecture/canon/document.js";
 import { serializeCanonicalArchitectureDocument } from "../../architecture/canon/codec.js";
@@ -136,6 +137,7 @@ function input(overrides: Partial<PromotionPreflightInput> = {}): PromotionPrefl
     change,
     lifecycle: lifecycleFor(change),
     certifiedTarget: targetDocument,
+    promotionTransition: { state: "promoted" },
     ...overrides,
   };
 }
@@ -156,6 +158,8 @@ test("plans the exact certified target and terminal lifecycle mutations", () => 
   assert.equal(result.plan.nextLifecycle.state, "promoted");
   assert.equal(result.plan.receipt.event, "PROMOTE");
   assert.equal(result.plan.preimages.length, 2);
+  assert.equal(result.plan.writes[0].expectedDigest, sha256(result.plan.preimages[0].bytes));
+  assert.notEqual(result.plan.writes[0].expectedDigest, value.current.revision.canonDigest);
 });
 
 test("advanced current Canon produces no write plan", () => {
@@ -210,6 +214,29 @@ test("preflight does not invoke a writer or mutate supplied facts", () => {
   assert.equal(result.ok, true);
   assert.equal(JSON.stringify(value), before);
 });
+
+test("byte CAS uses the exact loaded bytes even when their Canon is semantically equivalent", () => {
+  const value = input();
+  const currentBytes = ` ${serializeCanonicalArchitectureDocument(value.current.document)}\n`;
+  const result = preflightPromotion({ ...value, current: { ...value.current, bytes: currentBytes } });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.plan.writes[0].expectedDigest, sha256(currentBytes));
+  assert.equal(result.plan.preimages[0].bytes, currentBytes);
+});
+
+test("certification-review cannot be planned without an authorized PROMOTE result", () => {
+  const value = input({ promotionTransition: { state: "certification-review" } });
+  const result = preflightPromotion(value);
+
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.failure.code, "stale-certification");
+});
+
+function sha256(value: string | Uint8Array): string {
+  return createHash("sha256").update(value).digest("hex");
+}
 
 test("promotion requires each independent certification digest binding", () => {
   const value = input();
