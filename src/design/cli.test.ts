@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseDesignArguments } from "./cli/arguments.js";
-import { runDesignCli } from "./cli.js";
+import { runDesignCli, serializeDesignCliOutput } from "./cli.js";
 
 test("production Design CLI keeps read leaves bounded and rejects unknown workflow leaves", () => {
   const parsed = parseDesignArguments(["design", "show", "change-225", "--json"]);
@@ -27,4 +27,20 @@ test("Design CLI reports a missing repository Canon as a non-zero result", async
     console.error = originalError;
     console.log = originalLog;
   }
+});
+
+test("Design CLI omits undefined optional result fields from canonical output", () => {
+  assert.equal(
+    serializeDesignCliOutput(
+      {
+        changeId: "change-292",
+        state: "approved",
+        implementations: [],
+        review: undefined,
+        certification: undefined,
+      },
+      true,
+    ),
+    '{"changeId":"change-292","implementations":[],"state":"approved"}',
+  );
 });
