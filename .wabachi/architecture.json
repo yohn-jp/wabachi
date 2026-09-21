@@ -481,6 +481,12 @@
       "tests": []
     },
     {
+      "canonId": "create-architecture-document-intent",
+      "paths": [{ "path": "src/architecture/canon/document.ts", "scope": "file" }],
+      "symbols": [{ "path": "src/architecture/canon/document.ts", "symbol": "createArchitectureDocument" }],
+      "tests": []
+    },
+    {
       "canonId": "correlation-engine",
       "paths": [{ "path": "src/runtime/correlation.ts", "scope": "file" }],
       "symbols": [],
@@ -686,6 +692,37 @@
       "presentation": { "layout": "auto", "direction": "tb" }
     }
   ],
+  "codeIntents": {
+    "schemaVersion": 1,
+    "entries": [
+      {
+        "id": "create-architecture-document-intent",
+        "ownerId": "canon-service",
+        "responsibilityIds": ["canon-authority-responsibility"],
+        "decisionIds": ["authority-boundary-decision"],
+        "invariants": [
+          {
+            "id": "canon-document-composition",
+            "text": "createArchitectureDocument preserves declared Canon sections, identity ownership, and source intent"
+          }
+        ],
+        "prohibitions": [
+          {
+            "id": "canon-document-no-projection-authority",
+            "text": "Generated projections must not become Canon authority"
+          }
+        ],
+        "verificationObligations": [
+          {
+            "id": "create-architecture-document-symbol",
+            "statementId": "canon-document-composition",
+            "mode": "machine",
+            "predicate": "defines"
+          }
+        ]
+      }
+    ]
+  },
   "globalIdentityRegistry": {
     "entries": [
       { "id": "adr-024", "namespace": "reference" },
@@ -705,6 +742,7 @@
       { "id": "authority-boundary-decision", "namespace": "decision" },
       { "id": "canon-authority-responsibility", "namespace": "responsibility" },
       { "id": "canon-service", "namespace": "element" },
+      { "id": "create-architecture-document-intent", "namespace": "code-intent" },
       { "id": "cli-routing-responsibility", "namespace": "responsibility" },
       { "id": "cli-run", "namespace": "interface" },
       { "id": "cli-surface-decision", "namespace": "decision" },
