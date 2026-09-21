@@ -273,3 +273,42 @@ test("fails closed when the global identity registry disagrees with its sections
     ),
   );
 });
+
+test("validates Code Intent references and keeps its identity out of element-only relationships", () => {
+  const document = createArchitectureDocument({
+    documentId: "document",
+    root: { id: "architecture" },
+    elements: [{ id: "orders", kind: "service" }],
+    interfaces: [{ id: "orders-api", owner: "intent" }],
+    relationships: [{ source: "intent", target: "orders", kind: "calls" }],
+    repositoryMappings: [{ canonId: "intent", paths: ["src/orders.ts"] }],
+    codeIntents: {
+      schemaVersion: 1,
+      entries: [
+        {
+          id: "intent",
+          ownerId: "missing-owner",
+          responsibilityIds: ["missing-responsibility"],
+          decisionIds: ["missing-decision"],
+          invariants: [],
+          prohibitions: [],
+          verificationObligations: [],
+        },
+      ],
+    },
+  });
+
+  const result = validateArchitectureDocument(document);
+  assert.equal(result.valid, false);
+  assert.ok(
+    result.diagnostics.some(({ path, code }) => path === "interfaces[0].owner" && code === "invalid-reference-kind"),
+  );
+  assert.ok(
+    result.diagnostics.some(
+      ({ path, code }) => path === "relationships[0].source" && code === "invalid-reference-kind",
+    ),
+  );
+  assert.ok(result.diagnostics.some(({ code }) => code === "unknown-code-intent-owner"));
+  assert.ok(result.diagnostics.some(({ code }) => code === "unknown-code-intent-responsibility"));
+  assert.ok(result.diagnostics.some(({ code }) => code === "unknown-code-intent-decision"));
+});

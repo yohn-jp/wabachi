@@ -192,3 +192,36 @@ test("strictly decodes actor annotations and rejects malformed annotation fields
   (malformedProperties.elements as Array<Record<string, unknown>>)[0].properties = { key: 1 };
   assert.throws(() => decodeArchitectureDocument(malformedProperties), /string values/);
 });
+
+test("strictly round-trips Code Intent and rejects unknown section fields", () => {
+  const document = createArchitectureDocument({
+    documentId: "document",
+    root: { id: "architecture" },
+    elements: [{ id: "orders", kind: "service" }],
+    repositoryMappings: [{ canonId: "intent", paths: ["src/orders.ts"] }],
+    codeIntents: {
+      schemaVersion: 1,
+      entries: [
+        {
+          id: "intent",
+          ownerId: "orders",
+          responsibilityIds: [],
+          decisionIds: [],
+          invariants: [{ id: "invariant", text: "orders remain deterministic" }],
+          prohibitions: [],
+          verificationObligations: [],
+        },
+      ],
+    },
+  });
+  const encoded = serializeCanonicalArchitectureDocument(document);
+  assert.deepEqual(decodeArchitectureDocument(parsed(encoded)), document);
+
+  const unknownField = parsed(encoded);
+  (unknownField.codeIntents as Record<string, unknown>).unknown = true;
+  assert.throws(() => decodeArchitectureDocument(unknownField), /code intents contains unknown field/);
+
+  const badVersion = parsed(encoded);
+  (badVersion.codeIntents as Record<string, unknown>).schemaVersion = 2;
+  assert.throws(() => decodeArchitectureDocument(badVersion), /unsupported Code Intent schemaVersion/);
+});
