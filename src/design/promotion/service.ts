@@ -1,4 +1,5 @@
 import { canonicalizeJson, digestJson } from "../digest.js";
+import { serializeCanonicalArchitectureDocument } from "../../architecture/canon/codec.js";
 import type {
   CanonRevisionReference,
   DesignChangeSet,
@@ -224,7 +225,11 @@ export class DesignPromotionService {
       );
     }
     assertReceipt(receipt, receipt.value, "stored promotion receipt");
-    assertExactBytes(current.bytes, input.certifiedTargetBytes ?? current.bytes, "promoted current Canon");
+    assertExactBytes(
+      current.bytes,
+      input.certifiedTargetBytes ?? serializeCanonicalArchitectureDocument(input.certifiedTarget),
+      "promoted current Canon",
+    );
     if (current.revision.canonDigest !== receipt.value.promotedCanonDigest || lifecycle.state !== "promoted") {
       throw new PromotionServiceError(
         "receipt-conflict",

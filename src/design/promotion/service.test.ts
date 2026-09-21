@@ -119,6 +119,19 @@ test("writer conflict is surfaced without retrying an obsolete plan", async () =
   assert.equal(fixture.store.commits.length, 1);
 });
 
+test("idempotent retry rejects semantically equivalent but byte-different current Canon", async () => {
+  const fixture = createFixture();
+  const service = new DesignPromotionService(fixture.store);
+  await service.promote(fixture.input);
+  fixture.store.files.set(
+    ".wabachi/architecture.json",
+    bytes(" \n" + serializeCanonicalArchitectureDocument(fixture.input.certifiedTarget) + "\n"),
+  );
+
+  await assert.rejects(() => service.promote(fixture.input), /bytes do not match the certified post-image/);
+  assert.equal(fixture.store.commits.length, 1);
+});
+
 test("an interrupted transaction never reports promotion success", async () => {
   const fixture = createFixture();
   fixture.store.failCommit = new Error("interrupted transaction");
