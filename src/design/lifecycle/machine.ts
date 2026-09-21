@@ -12,6 +12,8 @@ import type { Digest } from "../digest.js";
 export interface DesignChangeLifecycleFacts {
   readonly changeId: string;
   readonly changeDigest: Digest;
+  /** Immutable Git revision at which the proposal was resolved. */
+  readonly proposalRevision?: string;
   readonly review?: DesignReviewEvidence;
   readonly implementations: readonly ImplementationLink[];
   readonly certification?: CertificationEvidence;
@@ -38,6 +40,7 @@ export type DesignChangeLifecycleEvent =
   | { readonly type: "START_IMPLEMENTATION" }
   | { readonly type: "SUBMIT_FOR_CERTIFICATION" }
   | { readonly type: "CERTIFICATION_REWORK" }
+  | { readonly type: "AMEND" }
   | { readonly type: "PROMOTE" };
 
 export const DESIGN_CHANGE_LIFECYCLE_EVENT = {
@@ -47,6 +50,7 @@ export const DESIGN_CHANGE_LIFECYCLE_EVENT = {
   startImplementation: "START_IMPLEMENTATION",
   submitForCertification: "SUBMIT_FOR_CERTIFICATION",
   certificationRework: "CERTIFICATION_REWORK",
+  amend: "AMEND",
   promote: "PROMOTE",
 } as const satisfies Record<string, DesignChangeLifecycleEvent["type"]>;
 
@@ -68,8 +72,10 @@ function factsFromInput(input: DesignChangeLifecycleInput | undefined): DesignCh
 
 function reviewMatches(context: DesignChangeLifecycleContext, decision: DesignReviewEvidence["decision"]): boolean {
   return (
+    context.proposalRevision !== undefined &&
     context.review?.changeId === context.changeId &&
     context.review.proposalDigest === context.changeDigest &&
+    context.review.proposalRevision === context.proposalRevision &&
     context.review.decision === decision
   );
 }
@@ -110,6 +116,12 @@ const lifecycleSetup = setup({
     rejectIllegalTransition: assign({
       lastError: ({ event }) => ({ code: "illegal-transition", event: event.type }),
     }),
+    invalidateEvidence: assign({
+      review: () => undefined,
+      implementations: () => [],
+      certification: () => undefined,
+      lastError: () => undefined,
+    }),
   },
 });
 
@@ -122,6 +134,7 @@ function definition(initial: DesignChangeLifecycleState) {
       draft: {
         on: {
           SUBMIT_FOR_DESIGN_REVIEW: { target: "design-review", actions: "clearError" },
+          AMEND: { target: "draft", actions: "invalidateEvidence" },
           "*": { actions: "rejectIllegalTransition" },
         },
       },
@@ -137,6 +150,7 @@ function definition(initial: DesignChangeLifecycleState) {
             guard: "designReviewNeedsRework",
             actions: "clearError",
           },
+          AMEND: { target: "draft", actions: "invalidateEvidence" },
           "*": { actions: "rejectIllegalTransition" },
         },
       },
@@ -147,6 +161,7 @@ function definition(initial: DesignChangeLifecycleState) {
             guard: "designReviewApproved",
             actions: "clearError",
           },
+          AMEND: { target: "draft", actions: "invalidateEvidence" },
           "*": { actions: "rejectIllegalTransition" },
         },
       },
@@ -157,6 +172,7 @@ function definition(initial: DesignChangeLifecycleState) {
             guard: "implementationLinked",
             actions: "clearError",
           },
+          AMEND: { target: "draft", actions: "invalidateEvidence" },
           "*": { actions: "rejectIllegalTransition" },
         },
       },
@@ -172,6 +188,7 @@ function definition(initial: DesignChangeLifecycleState) {
             guard: "certificationNeedsRework",
             actions: "clearError",
           },
+          AMEND: { target: "draft", actions: "invalidateEvidence" },
           "*": { actions: "rejectIllegalTransition" },
         },
       },

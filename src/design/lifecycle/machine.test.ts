@@ -9,10 +9,12 @@ import {
   createDesignChangeLifecycleMachine,
   type DesignChangeLifecycleEvent,
   type DesignChangeLifecycleFacts,
+  type DesignChangeLifecycleInput,
 } from "./machine.js";
 
 const changeId = "change-203";
 const changeDigest = "digest-203" as Digest;
+const proposalRevision = "revision-203";
 const implementation: ImplementationLink = {
   linkId: "implementation-link-203",
   changeId,
@@ -29,7 +31,7 @@ const approvedReview: DesignReviewEvidence = {
   reviewId: "review-203",
   changeId,
   proposalDigest: changeDigest,
-  proposalRevision: "revision-203",
+  proposalRevision,
   decision: "approved",
   actor: "reviewer",
   reason: "approved",
@@ -50,13 +52,14 @@ const certification: CertificationEvidence = {
 const facts: DesignChangeLifecycleFacts = {
   changeId,
   changeDigest,
+  proposalRevision,
   review: approvedReview,
   implementations: [implementation],
   certification,
 };
 
-function actorFor(input: DesignChangeLifecycleFacts = facts) {
-  const actor = createActor(createDesignChangeLifecycleMachine(), { input });
+function actorFor(input: DesignChangeLifecycleInput = facts) {
+  const actor = createActor(createDesignChangeLifecycleMachine(input), { input });
   actor.start();
   return actor;
 }
@@ -136,4 +139,34 @@ test("returns certification rework to implementing and does not promote mismatch
   assert.equal(send(promoted, { type: "START_IMPLEMENTATION" }).value, "promoted");
   assert.equal(promoted.getSnapshot().context.lastError?.event, "START_IMPLEMENTATION");
   promoted.stop();
+});
+
+test("treats AMEND as a lifecycle event and invalidates current evidence", () => {
+  const states = ["draft", "design-review", "approved", "implementing", "certification-review"] as const;
+
+  for (const initialState of states) {
+    const actor = actorFor({ ...facts, initialState });
+    assert.equal(send(actor, { type: "AMEND" }).value, "draft");
+    assert.equal(actor.getSnapshot().context.review, undefined);
+    assert.deepEqual(actor.getSnapshot().context.implementations, []);
+    assert.equal(actor.getSnapshot().context.certification, undefined);
+    actor.stop();
+  }
+
+  const promoted = actorFor({ ...facts, initialState: "promoted" });
+  assert.equal(send(promoted, { type: "AMEND" }).value, "promoted");
+  assert.equal(promoted.getSnapshot().context.lastError?.event, "AMEND");
+  promoted.stop();
+});
+
+test("fails closed when proposal revision is missing or does not match review evidence", () => {
+  const missingRevision = actorFor({ ...facts, proposalRevision: undefined });
+  send(missingRevision, { type: "SUBMIT_FOR_DESIGN_REVIEW" });
+  assert.equal(send(missingRevision, { type: "DESIGN_REVIEW_APPROVED" }).value, "design-review");
+  missingRevision.stop();
+
+  const mismatchedRevision = actorFor({ ...facts, proposalRevision: "different-revision" });
+  send(mismatchedRevision, { type: "SUBMIT_FOR_DESIGN_REVIEW" });
+  assert.equal(send(mismatchedRevision, { type: "DESIGN_REVIEW_APPROVED" }).value, "design-review");
+  mismatchedRevision.stop();
 });
