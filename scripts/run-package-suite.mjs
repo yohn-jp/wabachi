@@ -87,6 +87,8 @@ function main() {
     "dist/architecture/documentation/react-flow.js",
     "dist/architecture/projection/react-flow.js",
     "dist/design/projection/document.js",
+    "dist/design/projection/html.js",
+    "dist/design/projection/site.js",
   ]) {
     if (!packedFiles.includes(requiredPath)) {
       throw new Error(`required bundled asset "${requiredPath}" is not included in the packed tarball`);
