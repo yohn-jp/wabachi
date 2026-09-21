@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -138,6 +138,89 @@ describe("Design filesystem transactions", () => {
     );
     await assert.rejects(recoverTransaction(root, { transactionId: "old-lock" }), TransactionBusyError);
     await recoverTransaction(root, { transactionId: "old-lock", force: true });
+  });
+
+  it("allows only one concurrent recovery winner and never steals a takeover gate", async () => {
+    const root = await makeRoot();
+    const target = path.join(root, "state.json");
+    await writeFile(target, "before\n");
+    await assert.rejects(
+      commitTransaction({
+        rootDir: root,
+        transactionId: "concurrent-recovery",
+        targets: [{ path: target, content: "after\n", expectedDigest: digest("before\n") }],
+        faultInjector: () => {
+          throw new Error("leave pending");
+        },
+      }),
+      /leave pending/,
+    );
+    await writeFile(
+      path.join(root, ".transactions", "lock"),
+      JSON.stringify({ pid: 2 ** 31 - 1, token: "stopped-writer" }) + "\n",
+      { flag: "wx" },
+    );
+
+    const outcomes = await Promise.allSettled([
+      recoverTransaction(root, { transactionId: "concurrent-recovery", force: true }),
+      recoverTransaction(root, { transactionId: "concurrent-recovery", force: true }),
+    ]);
+    assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+    assert.equal(await readFile(target, "utf8"), "after\n");
+
+    await writeFile(
+      path.join(root, ".transactions", "takeover"),
+      JSON.stringify({ pid: 2 ** 31 - 1, token: "operator-owned-gate" }) + "\n",
+      { flag: "wx" },
+    );
+    await assert.rejects(
+      commitTransaction({
+        rootDir: root,
+        targets: [{ path: path.join(root, "other.json"), content: "other\n" }],
+      }),
+      TransactionBusyError,
+    );
+    assert.equal(
+      await readFile(path.join(root, ".transactions", "takeover"), "utf8"),
+      '{"pid":2147483647,"token":"operator-owned-gate"}\n',
+    );
+  });
+
+  it("creates missing parents during recovery without crossing a symlink boundary", async () => {
+    const root = await makeRoot();
+    const nested = path.join(root, "missing", "directory", "state.json");
+    await assert.rejects(
+      commitTransaction({
+        rootDir: root,
+        transactionId: "missing-parent",
+        targets: [{ path: nested, content: "after\n", expectedDigest: null }],
+        faultInjector: () => {
+          throw new Error("leave pending");
+        },
+      }),
+      /leave pending/,
+    );
+    await writeFile(
+      path.join(root, ".transactions", "lock"),
+      JSON.stringify({ pid: 2 ** 31 - 1, token: "stopped-writer" }) + "\n",
+      { flag: "wx" },
+    );
+    await recoverTransaction(root, { transactionId: "missing-parent", force: true });
+    assert.equal(await readFile(nested, "utf8"), "after\n");
+
+    const outside = await mkdtemp(path.join(os.tmpdir(), "wabachi-outside-"));
+    temporaryRoots.push(outside);
+    const escapedParent = path.join(root, "escaped");
+    await symlink(outside, escapedParent);
+    await assert.rejects(
+      commitTransaction({
+        rootDir: root,
+        transactionId: "symlink-target",
+        targets: [{ path: path.join(escapedParent, "state.json"), content: "must not write" }],
+      }),
+      /symlink/,
+    );
+    await assert.rejects(readFile(path.join(outside, "state.json"), "utf8"));
   });
 });
 
