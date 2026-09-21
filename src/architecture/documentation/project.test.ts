@@ -209,3 +209,56 @@ test("projection refuses an Architecture Canon that has not passed complete-docu
 
   assert.throws(() => projectArchitectureDocument(invalid), /cannot project invalid Architecture Canon/);
 });
+
+test("projects Canon-owned Code Intent with navigable Canon anchors", () => {
+  const document = createArchitectureDocument({
+    documentId: "intent-document",
+    root: { id: "architecture" },
+    elements: [{ id: "orders", kind: "service" }],
+    repositoryMappings: [
+      { canonId: "orders", paths: ["src/orders.ts"] },
+      { canonId: "orders-intent", paths: ["src/orders.ts"] },
+    ],
+    responsibilities: {
+      responsibilities: [{ id: "orders-responsibility", target: { kind: "object", id: "orders" }, concern: "orders" }],
+    },
+    decisions: {
+      decisions: [
+        {
+          id: "orders-decision",
+          title: "Use orders",
+          status: "accepted",
+          type: "architecture",
+          rationale: "Orders owns order processing.",
+          targetIds: ["orders"],
+          referenceIds: [],
+        },
+      ],
+    },
+    codeIntents: {
+      schemaVersion: 1,
+      entries: [
+        {
+          id: "orders-intent",
+          ownerId: "orders",
+          responsibilityIds: ["orders-responsibility"],
+          decisionIds: ["orders-decision"],
+          invariants: [{ id: "orders-invariant", text: "Orders remain authoritative." }],
+          prohibitions: [],
+          verificationObligations: [
+            { id: "orders-check", statementId: "orders-invariant", mode: "machine", predicate: "owns(orders)" },
+          ],
+        },
+      ],
+    },
+  });
+
+  const model = projectArchitectureDocument(document);
+  assert.deepEqual(model.navigation.at(-1), { section: "codeIntent", groupKeys: ["codeIntents"] });
+  assert.deepEqual(group(model, "codeIntent", "codeIntents").entries[0]?.anchors, [
+    { canonId: "orders-intent" },
+    { canonId: "orders" },
+    { canonId: "orders-responsibility" },
+    { canonId: "orders-decision" },
+  ]);
+});
