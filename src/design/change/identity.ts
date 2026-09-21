@@ -24,7 +24,8 @@ export type EntryGroup =
   | "decisions"
   | "decisionReferences"
   | "referenceAttachments"
-  | "views";
+  | "views"
+  | "codeIntents";
 
 export interface SemanticEntry {
   readonly entryKey: SemanticEntryKey;
@@ -56,6 +57,7 @@ interface CanonJson {
     readonly referenceAttachments: readonly JsonValue[];
   };
   readonly views: readonly JsonValue[];
+  readonly codeIntents?: { readonly entries: readonly JsonValue[] };
 }
 
 function asRecord(value: JsonValue, label: string): JsonObject {
@@ -161,6 +163,8 @@ export function deriveSemanticEntryKey(group: EntryGroup, value: JsonValue): Sem
       return key("decision", "reference-attachment", text(record.targetId, "reference attachment targetId"));
     case "views":
       return key("view", text(record.key, "view key"));
+    case "codeIntents":
+      return key("code-intent", text(record.id, "code intent id"));
   }
 }
 
@@ -199,5 +203,6 @@ export function deriveSemanticEntries(document: ArchitectureDocumentV1): readonl
   append("decisionReferences", json.decisions.references);
   append("referenceAttachments", json.decisions.referenceAttachments);
   append("views", json.views);
+  append("codeIntents", json.codeIntents?.entries ?? []);
   return entries;
 }

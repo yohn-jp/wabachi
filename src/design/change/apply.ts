@@ -1,4 +1,5 @@
 import {
+  CODE_INTENT_SCHEMA_VERSION,
   createArchitectureDocument,
   type ArchitectureDocumentInput,
   type ArchitectureDocumentV1,
@@ -42,6 +43,10 @@ interface WorkingCanon {
     referenceAttachments: unknown[];
   };
   views: unknown[];
+  codeIntents?: {
+    schemaVersion: typeof CODE_INTENT_SCHEMA_VERSION;
+    entries: unknown[];
+  };
 }
 
 interface EntrySlot {
@@ -180,6 +185,14 @@ function workingCanon(base: ArchitectureDocumentV1): WorkingCanon {
       referenceAttachments: [...base.decisions.referenceAttachments],
     },
     views: [...base.views],
+    ...(base.codeIntents === undefined
+      ? {}
+      : {
+          codeIntents: {
+            schemaVersion: base.codeIntents.schemaVersion,
+            entries: [...base.codeIntents.entries],
+          },
+        }),
   };
 }
 
@@ -225,6 +238,9 @@ function valuesForGroup(working: WorkingCanon, group: EntryGroup): unknown[] {
       return working.decisions.referenceAttachments;
     case "views":
       return working.views;
+    case "codeIntents":
+      if (working.codeIntents === undefined) fail("working Canon no longer contains its Code Intent section");
+      return working.codeIntents.entries;
   }
 }
 
@@ -263,6 +279,8 @@ function collectionForGroup(group: EntryGroup): SemanticEntryCollection {
       return "decision";
     case "views":
       return "view";
+    case "codeIntents":
+      return "code-intent";
   }
 }
 
@@ -352,10 +370,13 @@ function appendTarget(working: WorkingCanon, key: ParsedEntryKey, value: unknown
       return createAppendSlot("reference-attachment:add", category, working.decisions.referenceAttachments);
     case "view":
       return createAppendSlot("view:add", category, working.views);
+    case "code-intent":
+      if (working.codeIntents === undefined) {
+        working.codeIntents = { schemaVersion: CODE_INTENT_SCHEMA_VERSION, entries: [] };
+      }
+      return createAppendSlot("code-intent:add", category, working.codeIntents.entries);
     case "architecture":
       fail("the architecture root cannot be added");
-    case "code-intent":
-      fail("code-intent entries are not part of ArchitectureDocumentV1");
   }
 }
 
@@ -412,7 +433,7 @@ function entryGroupFor(collection: SemanticEntryCollection, value: unknown): Ent
     case "view":
       return "views";
     case "code-intent":
-      fail("code-intent entries are not part of ArchitectureDocumentV1");
+      return "codeIntents";
   }
 }
 
@@ -454,7 +475,6 @@ function prepareOperations(
   for (const operation of operations) {
     if (operation === null || typeof operation !== "object") fail("operation must be an object");
     const key = parseEntryKey(operation.entryKey);
-    if (key.collection === "code-intent") fail("code-intent entries are not part of ArchitectureDocumentV1");
     if (seenKeys.has(key.encoded)) fail("duplicate operation target " + key.encoded);
     seenKeys.add(key.encoded);
 
@@ -512,6 +532,7 @@ function composeProposedCanon(working: WorkingCanon): ArchitectureDocumentV1 {
       repositoryMappings: working.repositoryMappings,
       decisions: working.decisions,
       views: working.views,
+      ...(working.codeIntents === undefined ? {} : { codeIntents: working.codeIntents }),
     } as ArchitectureDocumentInput);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -561,8 +582,18 @@ export function applyDesignChange(
 
   const proposed = composeProposedCanon(working);
   const actualTargetDigest = digestJson(proposed);
-  if (actualTargetDigest !== change.target.targetCanonDigest) fail("target Canon digest mismatch");
-  return proposed;
+  if (actualTargetDigest === change.target.targetCanonDigest) return proposed;
+
+  // An optional Code Intent section has two canonical representations when
+  // its final entry is removed: absent, or explicitly empty. Try the absent
+  // representation only after the normal composition misses the target
+  // digest, preserving the target document's exact optional-section shape.
+  if (working.codeIntents?.entries.length === 0) {
+    const withoutCodeIntent = { ...working, codeIntents: undefined };
+    const fallback = composeProposedCanon(withoutCodeIntent);
+    if (digestJson(fallback) === change.target.targetCanonDigest) return fallback;
+  }
+  fail("target Canon digest mismatch");
 }
 
 /** Alias matching the DesignChangePort operation vocabulary. */
