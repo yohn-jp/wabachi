@@ -131,7 +131,11 @@ describe("Design filesystem transactions", () => {
       }),
       /leave pending/,
     );
-    await writeFile(path.join(root, ".transactions", "lock"), "old writer\n", { flag: "wx" });
+    await writeFile(
+      path.join(root, ".transactions", "lock"),
+      JSON.stringify({ pid: 2 ** 31 - 1, token: "stopped-writer" }) + "\n",
+      { flag: "wx" },
+    );
     await assert.rejects(recoverTransaction(root, { transactionId: "old-lock" }), TransactionBusyError);
     await recoverTransaction(root, { transactionId: "old-lock", force: true });
   });

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { assertRepositoryPathBoundary } from "./paths.js";
 
 const TRANSACTION_DIRECTORY = ".transactions";
 const LOCK_FILE = "lock";
@@ -100,6 +101,7 @@ interface LockHandle {
   readonly file: Awaited<ReturnType<typeof open>>;
   readonly path: string;
   readonly rootDir: string;
+  readonly token: string;
 }
 
 interface ResolvedTarget extends TransactionTarget {
@@ -127,6 +129,7 @@ export async function commitTransaction(request: CommitTransactionRequest): Prom
   try {
     await assertNoPendingTransactions(rootDir);
     transactionDirectory = path.join(rootDir, TRANSACTION_DIRECTORY, transactionId);
+    await assertPathBoundary(rootDir, transactionDirectory);
     await mkdir(path.join(transactionDirectory, "stage"), { recursive: true });
 
     const journalTargets: JournalTarget[] = targets.map((target, index) => ({
@@ -146,6 +149,7 @@ export async function commitTransaction(request: CommitTransactionRequest): Prom
 
     for (const [index, target] of targets.entries()) {
       const stagePath = path.join(transactionDirectory, journalTargets[index].stage);
+      await assertPathBoundary(rootDir, stagePath);
       await writeDurableFile(stagePath, target.bytes);
     }
     await writeJournal(journalPath, {
@@ -172,7 +176,23 @@ export async function commitTransaction(request: CommitTransactionRequest): Prom
         targetPath: journalTarget.path,
         phase: "before-rename",
       });
+      await assertPathBoundary(rootDir, target.absolutePath);
+      await assertPathBoundary(rootDir, path.join(transactionDirectory, journalTarget.stage));
+      const digestBeforeRename = await digestFile(target.absolutePath);
+      if (digestBeforeRename !== journalTarget.expectedDigest) {
+        throw new TransactionConflictError(
+          `target ${journalTarget.path} changed before rename; refusing to overwrite it`,
+        );
+      }
       await mkdir(path.dirname(target.absolutePath), { recursive: true });
+      await assertPathBoundary(rootDir, target.absolutePath);
+      await assertPathBoundary(rootDir, path.join(transactionDirectory, journalTarget.stage));
+      const digestAfterParentCreation = await digestFile(target.absolutePath);
+      if (digestAfterParentCreation !== journalTarget.expectedDigest) {
+        throw new TransactionConflictError(
+          `target ${journalTarget.path} changed before rename; refusing to overwrite it`,
+        );
+      }
       await rename(path.join(transactionDirectory, journalTarget.stage), target.absolutePath);
       await syncDirectory(path.dirname(target.absolutePath));
       await invokeFaultInjector(request.faultInjector, {
@@ -199,6 +219,7 @@ export async function commitTransaction(request: CommitTransactionRequest): Prom
       targets: journalTargets,
       completed,
     });
+    await assertPathBoundary(rootDir, transactionDirectory);
     await removeTransactionDirectory(transactionDirectory);
     return { transactionId, state: "committed" };
   } finally {
@@ -232,7 +253,9 @@ export async function recoverTransaction(
   const lock = await acquireLock(rootDir, options.force === true);
   try {
     const transactionDirectory = path.join(rootDir, TRANSACTION_DIRECTORY, selected.transactionId);
+    await assertPathBoundary(rootDir, transactionDirectory);
     const journalPath = path.join(transactionDirectory, JOURNAL_FILE);
+    await assertPathBoundary(rootDir, journalPath);
     const journal = await readJournal(journalPath, selected.transactionId);
     await validateRecoveryImages(rootDir, transactionDirectory, journal);
 
@@ -252,6 +275,19 @@ export async function recoverTransaction(
         throw new TransactionConflictError(`post-image for ${target.path} is no longer staged`);
       }
       const targetPath = resolveInsideRoot(rootDir, target.path);
+      await assertPathBoundary(rootDir, targetPath);
+      await assertPathBoundary(rootDir, stagePath);
+      const digestBeforeParentCreation = await digestFile(targetPath);
+      if (digestBeforeParentCreation !== target.expectedDigest) {
+        throw new TransactionConflictError(`target ${target.path} changed during recovery`);
+      }
+      await mkdir(path.dirname(targetPath), { recursive: true });
+      await assertPathBoundary(rootDir, targetPath);
+      await assertPathBoundary(rootDir, stagePath);
+      const digestBeforeRename = await digestFile(targetPath);
+      if (digestBeforeRename !== target.expectedDigest) {
+        throw new TransactionConflictError(`target ${target.path} changed during recovery`);
+      }
       await rename(stagePath, targetPath);
       await syncDirectory(path.dirname(targetPath));
       completed = addCompleted(completed, index);
@@ -272,6 +308,7 @@ export async function recoverTransaction(
       targets: journal.targets,
       completed,
     });
+    await assertPathBoundary(rootDir, transactionDirectory);
     await removeTransactionDirectory(transactionDirectory);
     return { transactionId: journal.transactionId, state: "committed" };
   } finally {
@@ -283,6 +320,7 @@ export async function recoverTransaction(
 export async function listPendingTransactions(rootDirInput: string): Promise<readonly PendingTransaction[]> {
   const rootDir = path.resolve(rootDirInput);
   const directory = path.join(rootDir, TRANSACTION_DIRECTORY);
+  await assertPathBoundary(rootDir, directory);
   let entries;
   try {
     entries = await readdir(directory, { withFileTypes: true });
@@ -323,6 +361,7 @@ async function resolveTargets(rootDir: string, targets: readonly TransactionTarg
   const resolved = await Promise.all(
     targets.map(async (target) => {
       const absolutePath = resolveInsideRoot(rootDir, target.path);
+      await assertPathBoundary(rootDir, absolutePath);
       const relativePath = path.relative(rootDir, absolutePath);
       if (relativePath === TRANSACTION_DIRECTORY || relativePath.startsWith(`${TRANSACTION_DIRECTORY}${path.sep}`)) {
         throw new DesignTransactionError("transaction metadata cannot be a transaction target");
@@ -360,30 +399,116 @@ function resolveInsideRoot(rootDir: string, targetPath: string): string {
   return absolutePath;
 }
 
+async function assertPathBoundary(rootDir: string, targetPath: string): Promise<void> {
+  const root = path.resolve(rootDir);
+  const absolutePath = path.resolve(targetPath);
+  const relativePath = path.relative(root, absolutePath);
+  if (
+    relativePath === "" ||
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    throw new DesignTransactionError(`transaction path is outside rootDir: ${targetPath}`);
+  }
+  try {
+    await assertRepositoryPathBoundary(root, relativePath.split(path.sep).join("/"));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new DesignTransactionError(message);
+  }
+}
+
 async function acquireLock(rootDir: string, force = false): Promise<LockHandle> {
   const transactionDirectory = path.join(rootDir, TRANSACTION_DIRECTORY);
+  await assertPathBoundary(rootDir, transactionDirectory);
   await mkdir(transactionDirectory, { recursive: true });
   const lockPath = path.join(transactionDirectory, LOCK_FILE);
+  await assertPathBoundary(rootDir, lockPath);
+  const token = randomUUID();
   let file;
   try {
     file = await open(lockPath, "wx");
   } catch (error) {
     if (!isErrno(error, "EEXIST") || !force) throw new TransactionBusyError(rootDir);
-    await unlink(lockPath);
-    file = await open(lockPath, "wx");
+    await takeOverStoppedLock(lockPath);
+    try {
+      file = await open(lockPath, "wx");
+    } catch {
+      throw new TransactionBusyError(rootDir);
+    }
   }
   await file.writeFile(
-    JSON.stringify({ pid: process.pid, transactionStartedAt: new Date().toISOString() }) + "\n",
+    JSON.stringify({ pid: process.pid, token, transactionStartedAt: new Date().toISOString() }) + "\n",
     "utf8",
   );
   await file.sync();
-  return { file, path: lockPath, rootDir };
+  return { file, path: lockPath, rootDir, token };
 }
 
 async function releaseLock(lock: LockHandle): Promise<void> {
   await lock.file.close();
-  await removeIfPresent(lock.path);
+  if (await lockStillOwned(lock.path, lock.token)) await removeIfPresent(lock.path);
   await syncDirectory(path.dirname(lock.path));
+}
+
+async function takeOverStoppedLock(lockPath: string): Promise<void> {
+  const owner = await readLockOwner(lockPath);
+  if (owner === undefined || isProcessRunning(owner.pid)) {
+    throw new TransactionBusyError(path.dirname(path.dirname(lockPath)));
+  }
+  await unlink(lockPath);
+}
+
+async function readLockOwner(lockPath: string): Promise<{ pid: number; token: string } | undefined> {
+  let contents: string;
+  try {
+    contents = await readFile(lockPath, "utf8");
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return undefined;
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contents);
+  } catch {
+    return undefined;
+  }
+  const pid = isRecord(parsed) && typeof parsed.pid === "number" ? parsed.pid : undefined;
+  const token = isRecord(parsed) && typeof parsed.token === "string" ? parsed.token : undefined;
+  if (
+    pid === undefined ||
+    !Number.isInteger(pid) ||
+    pid <= 0 ||
+    pid > 2 ** 31 - 1 ||
+    token === undefined ||
+    token.length === 0
+  ) {
+    return undefined;
+  }
+  return { pid, token };
+}
+
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (isErrno(error, "ESRCH")) return false;
+    return true;
+  }
+}
+
+async function lockStillOwned(lockPath: string, token: string): Promise<boolean> {
+  try {
+    const stat = await lstat(lockPath);
+    if (stat.isSymbolicLink()) return false;
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return false;
+    throw error;
+  }
+  const owner = await readLockOwner(lockPath);
+  return owner?.pid === process.pid && owner.token === token;
 }
 
 async function writeDurableFile(filePath: string, content: Uint8Array): Promise<void> {
@@ -457,12 +582,14 @@ async function readJournal(journalPath: string, expectedId: string): Promise<Jou
 async function validateRecoveryImages(rootDir: string, transactionDirectory: string, journal: Journal): Promise<void> {
   for (const target of journal.targets) {
     const targetPath = resolveInsideRoot(rootDir, target.path);
+    await assertPathBoundary(rootDir, targetPath);
     const actualDigest = await digestFile(targetPath);
     if (actualDigest !== target.expectedDigest && actualDigest !== target.postDigest) {
       throw new TransactionConflictError(`target ${target.path} is neither its expected pre-image nor post-image`);
     }
     if (actualDigest === target.expectedDigest) {
       const stagePath = resolveInsideRoot(transactionDirectory, target.stage);
+      await assertPathBoundary(rootDir, stagePath);
       if (!(await isPresent(stagePath)) || (await digestFile(stagePath)) !== target.postDigest) {
         throw new TransactionConflictError(`post-image for ${target.path} is unavailable for recovery`);
       }
@@ -472,7 +599,9 @@ async function validateRecoveryImages(rootDir: string, transactionDirectory: str
 
 async function verifyPostImages(rootDir: string, targets: readonly JournalTarget[]): Promise<void> {
   for (const target of targets) {
-    const actualDigest = await digestFile(resolveInsideRoot(rootDir, target.path));
+    const targetPath = resolveInsideRoot(rootDir, target.path);
+    await assertPathBoundary(rootDir, targetPath);
+    const actualDigest = await digestFile(targetPath);
     if (actualDigest !== target.postDigest) {
       throw new TransactionConflictError(`target ${target.path} does not match its committed post-image`);
     }
