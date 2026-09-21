@@ -4,10 +4,32 @@ import type {
   CertificationEvidence,
   DesignChangeSet,
   DesignChangeSetPayload,
+  DesignChangeLifecycleState,
   DesignIntentLifecycleRecord,
   DesignReviewEvidence,
   ImplementationLink,
+  MachineTransitionContext,
+  MachineTransitionEvent,
+  MachineTransitionRequest,
+  MachineTransitionResult,
+  RepositoryRevisionReference,
 } from "./contracts.js";
+
+/** Adapter boundary for the lifecycle machine; XState remains its authority. */
+export interface MachinePort {
+  readonly transition:
+    | ((request: MachineTransitionRequest) => MachineTransitionResult | DesignChangeLifecycleState)
+    | ((
+        state: DesignChangeLifecycleState,
+        event: MachineTransitionEvent,
+        context: MachineTransitionContext,
+      ) => MachineTransitionResult | DesignChangeLifecycleState);
+}
+
+/** Immutable revision/ancestry capability used by lifecycle consumers. */
+export interface GitPort {
+  isAncestor(ancestor: RepositoryRevisionReference, descendant: RepositoryRevisionReference): Promise<boolean>;
+}
 
 /** Read-only access to the existing Architecture Canon authority. */
 export interface CanonPort {
