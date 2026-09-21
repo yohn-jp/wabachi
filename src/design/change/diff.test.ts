@@ -38,10 +38,10 @@ test("diffs ordered flow semantics and authority-owner changes", () => {
   });
   const operations = diffArchitectureDocuments(base, target);
 
-  assert.equal(operations.length, 2);
-  assert.ok(operations.some((operation) => operation.kind === "modified" && operation.entryKey.includes("authority")));
+  assert.equal(operations.length, 3);
+  assert.equal(operations.filter((operation) => operation.entryKey.includes('"authority"')).length, 2);
   assert.ok(operations.some((operation) => operation.kind === "modified" && operation.entryKey.includes("flow")));
-  assert.equal(change(base, target).target.operations.length, 2);
+  assert.equal(change(base, target).target.operations.length, 3);
 });
 
 test("formatting and collection order differences produce no operations", () => {

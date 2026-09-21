@@ -36,6 +36,41 @@ export interface RelationshipEntryKeyInput {
   readonly interfaceId?: string;
 }
 
+/**
+ * Decode and re-encode a semantic key so consumers share the same canonical
+ * tuple validation as the producer.  The returned tuple excludes the
+ * collection envelope; its order is the collection's semantic contract.
+ */
+export function parseSemanticEntryKey(value: unknown): {
+  readonly collection: SemanticEntryCollection;
+  readonly identity: readonly string[];
+  readonly encoded: SemanticEntryKey;
+} {
+  if (typeof value !== "string") throw new TypeError("semantic entry key must be a string");
+
+  let tuple: unknown;
+  try {
+    tuple = JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new TypeError(`semantic entry key is not a JSON tuple: ${String(error)}`);
+  }
+  if (!Array.isArray(tuple) || tuple.length < 2 || typeof tuple[0] !== "string") {
+    throw new TypeError("semantic entry key must contain a collection and identity tuple");
+  }
+
+  const collection = tuple[0];
+  const identity = tuple.slice(1);
+  if (identity.some((part) => typeof part !== "string")) {
+    throw new TypeError("semantic entry key identity must contain strings");
+  }
+  const encoded = createSemanticEntryKey({
+    collection: collection as SemanticEntryCollection,
+    identity: identity as string[],
+  });
+  if (encoded !== value) throw new TypeError("semantic entry key is not canonically encoded");
+  return { collection: collection as SemanticEntryCollection, identity: identity as string[], encoded };
+}
+
 function normalizeIdentityPart(value: string, label: string): string {
   if (typeof value !== "string") {
     throw new TypeError(`${label} must be a string`);
