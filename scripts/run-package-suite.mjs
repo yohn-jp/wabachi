@@ -108,6 +108,9 @@ function main() {
   for (const requiredPath of [
     "docs/USAGE.md",
     "docs/examples/minimal-canon.json",
+    "docs/examples/design-change.json",
+    "docs/examples/design-review.json",
+    "docs/examples/implementation-review.json",
     "skills/wabachi/SKILL.md",
     ".codex-plugin/plugin.json",
     "dist/architecture/documentation/site.js",

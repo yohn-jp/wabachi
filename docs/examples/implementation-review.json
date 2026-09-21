@@ -1,0 +1,18 @@
+{
+  "linkId": "example-implementation-link",
+  "changeId": "example-design-change",
+  "changeDigest": "3333333333333333333333333333333333333333333333333333333333333333",
+  "implementation": {
+    "repositoryHost": "github.com",
+    "repositoryId": "1335559861",
+    "repository": "yohn-jp/wabachi",
+    "number": 1
+  },
+  "targetEntryKeys": ["[\"element\",\"example-service\"]"],
+  "evidence": [
+    {
+      "provider": "replace-with-provider",
+      "reference": "documentation-only-test-fixture; replace-with-immutable-completion-reference"
+    }
+  ]
+}

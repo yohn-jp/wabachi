@@ -40,6 +40,219 @@ function packageBinTargets(packageDirectory) {
   }));
 }
 
+function installedLauncher(binDirectory, name, args, cwd, timeout = 30_000) {
+  const launcher = path.join(binDirectory, name);
+  const result = spawnSync(launcher, args, {
+    cwd,
+    encoding: "utf8",
+    timeout,
+    env: { ...process.env },
+  });
+  if (result.error) fail(`installed ${name} ${args.join(" ")} failed to start: ${result.error.message}`);
+  return result;
+}
+
+function runInstalledJson(binDirectory, name, args, cwd) {
+  const result = installedLauncher(binDirectory, name, [...args, "--json"], cwd);
+  if (result.status !== 0) {
+    fail(`installed ${name} ${args.join(" ")} exited ${result.status}:\n${result.stdout}\n${result.stderr}`);
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    fail(
+      `installed ${name} ${args.join(" ")} returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function writeDesignTarget(sourcePath, targetPath) {
+  const target = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+  target.elements.push({ id: "installed-design-target", kind: "service" });
+  target.globalIdentityRegistry.entries.push({ id: "installed-design-target", namespace: "element" });
+  fs.writeFileSync(targetPath, `${JSON.stringify(target, null, 2)}\n`);
+}
+
+function runInstalledDesignSmoke(packageDirectory, binDirectory, binName) {
+  const designRepository = fs.mkdtempSync(path.join(os.tmpdir(), "smoke-design-repository-"));
+  try {
+    run("git", ["init", "-q"], { cwd: designRepository });
+    run("git", ["config", "user.email", "smoke@example.invalid"], { cwd: designRepository });
+    run("git", ["config", "user.name", "Wabachi installed smoke"], { cwd: designRepository });
+
+    const repositoryCanon = path.join(designRepository, ".wabachi", "architecture.json");
+    fs.mkdirSync(path.dirname(repositoryCanon), { recursive: true });
+    const minimalCanon = path.join(packageDirectory, "docs", "examples", "minimal-canon.json");
+    fs.copyFileSync(minimalCanon, repositoryCanon);
+    const targetCanon = path.join(designRepository, "target-canon.json");
+    writeDesignTarget(minimalCanon, targetCanon);
+    run("git", ["add", "."], { cwd: designRepository });
+    run("git", ["commit", "-qm", "bootstrap Canon"], { cwd: designRepository });
+
+    const change = runInstalledJson(
+      binDirectory,
+      binName,
+      ["design", "create", "installed-design-smoke", "target-canon.json"],
+      designRepository,
+    );
+    if (change.changeId !== "installed-design-smoke" || typeof change.digest !== "string") {
+      fail("installed Design create did not return a bound Design Change");
+    }
+    if (!Array.isArray(change.target?.operations) || change.target.operations.length === 0) {
+      fail("installed Design create did not produce a target operation");
+    }
+
+    for (const command of ["show", "diff", "status", "validate"]) {
+      const result = runInstalledJson(binDirectory, binName, ["design", command, change.changeId], designRepository);
+      if (result.ok === false) fail(`installed Design ${command} unexpectedly rejected the draft`);
+    }
+    const renderDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "smoke-design-site-"));
+    fs.rmSync(renderDirectory, { recursive: true, force: true });
+    try {
+      const rendered = runInstalledJson(
+        binDirectory,
+        binName,
+        ["design", "render", change.changeId, "--out", renderDirectory],
+        designRepository,
+      );
+      if (
+        rendered.status !== "ok" ||
+        rendered.complete !== true ||
+        !fs.existsSync(path.join(renderDirectory, "index.html"))
+      ) {
+        fail("installed Design render did not produce an offline site");
+      }
+    } finally {
+      fs.rmSync(renderDirectory, { recursive: true, force: true });
+    }
+
+    const submitted = runInstalledJson(binDirectory, binName, ["design", "submit", change.changeId], designRepository);
+    if (submitted.state !== "design-review") fail("installed Design submit did not enter design-review");
+
+    // The proposal revision is made immutable before review evidence is
+    // submitted, matching the production review freshness contract.
+    run("git", ["add", ".wabachi"], { cwd: designRepository });
+    run("git", ["commit", "-qm", "persist Design proposal"], { cwd: designRepository });
+    const proposalRevision = run("git", ["rev-parse", "HEAD"], { cwd: designRepository }).stdout.trim();
+    const reviewPath = path.join(designRepository, "design-review.json");
+    fs.writeFileSync(
+      reviewPath,
+      `${JSON.stringify(
+        {
+          reviewId: "installed-smoke-review",
+          changeId: change.changeId,
+          proposalDigest: change.digest,
+          proposalRevision,
+          decision: "approved",
+          actor: "installed-smoke",
+          reason: "test-only package smoke fixture; not dogfood evidence",
+          timestamp: "2026-09-21T00:00:00.000Z",
+          evidence: [{ provider: "manual", reference: "test-only installed package smoke" }],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const reviewed = runInstalledJson(
+      binDirectory,
+      binName,
+      ["design", "review", change.changeId, "--input", "design-review.json"],
+      designRepository,
+    );
+    if (reviewed.state !== "approved") fail("installed Design review did not record approved evidence");
+    const started = runInstalledJson(binDirectory, binName, ["design", "start", change.changeId], designRepository);
+    if (started.state !== "implementing") fail("installed Design start did not enter implementing");
+
+    const targetEntryKey = change.target.operations[0].entryKey;
+    const linkPath = path.join(designRepository, "implementation-review.json");
+    fs.writeFileSync(
+      linkPath,
+      `${JSON.stringify(
+        {
+          linkId: "installed-smoke-link",
+          changeId: change.changeId,
+          changeDigest: change.digest,
+          implementation: {
+            repositoryHost: "github.com",
+            repositoryId: "1335559861",
+            repository: "yohn-jp/wabachi",
+            number: 226,
+          },
+          targetEntryKeys: [targetEntryKey],
+          evidence: [{ provider: "manual", reference: "test-only installed package smoke" }],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const linked = runInstalledJson(
+      binDirectory,
+      binName,
+      ["design", "link", change.changeId, "--input", "implementation-review.json"],
+      designRepository,
+    );
+    if (linked.implementations?.length !== 1) fail("installed Design link did not persist implementation linkage");
+
+    const certificationPath = path.join(designRepository, "certification.json");
+    fs.writeFileSync(
+      certificationPath,
+      `${JSON.stringify(
+        {
+          changeId: change.changeId,
+          changeDigest: change.digest,
+          implementationRevision: { repository: "local/installed-smoke", revision: proposalRevision },
+          result: "match",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const fabricated = installedLauncher(
+      binDirectory,
+      binName,
+      ["design", "certify", change.changeId, "--input", "certification.json", "--json"],
+      designRepository,
+    );
+    if (
+      fabricated.status === 0 ||
+      !/unknown field: result|final CertificationEvidence|certification input/u.test(
+        fabricated.stdout + fabricated.stderr,
+      )
+    ) {
+      fail("installed Design certify accepted fabricated final-result evidence");
+    }
+    fs.writeFileSync(
+      certificationPath,
+      `${JSON.stringify(
+        {
+          changeId: change.changeId,
+          changeDigest: change.digest,
+          implementationRevision: { repository: "local/installed-smoke", revision: proposalRevision },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const incomplete = installedLauncher(
+      binDirectory,
+      binName,
+      ["design", "certify", change.changeId, "--input", "certification.json", "--json"],
+      designRepository,
+    );
+    if (
+      incomplete.status === 0 ||
+      !/illegal lifecycle transition|unresolved|certification/u.test(incomplete.stdout + incomplete.stderr)
+    ) {
+      fail("installed Design certify did not fail closed for incomplete evidence");
+    }
+    console.log(
+      "installed Design lifecycle smoke verified: create/show/diff/status/validate/render/review/link/certify guards.",
+    );
+  } finally {
+    fs.rmSync(designRepository, { recursive: true, force: true });
+  }
+}
+
 function parseArgs(argv) {
   const index = argv.indexOf("--tarball");
   return { tarball: index === -1 ? undefined : argv[index + 1] };
@@ -125,6 +338,7 @@ function main() {
 
     const architectureBin = binTargets.find(({ name }) => name === packageName) ?? binTargets[0];
     if (architectureBin === undefined) fail("installed package has no executable architecture renderer");
+    runInstalledDesignSmoke(installedPackageDirectory, binDirectory, architectureBin.name);
     const exampleResult = spawnSync(path.join(binDirectory, architectureBin.name), ["architecture", "example"], {
       cwd: installDirectory,
       encoding: "utf8",
