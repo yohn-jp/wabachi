@@ -1,8 +1,16 @@
-import { createActor } from "xstate";
-
+import { validateArchitectureDocument } from "../architecture/canon/validate.js";
+import type { CodeIntent } from "../architecture/canon/code-intent-contract.js";
 import { decodeDesignChangeSet } from "./change/codec.js";
 import { architectureCanonDigest, createDesignChangeSet, type DesignChangeAuthoringInput } from "./change/diff.js";
-import { digestJson } from "./digest.js";
+import { digestJson, type Digest } from "./digest.js";
+import {
+  aggregateCertification,
+  type CertificationAggregationResult,
+  type GitImplementationSubject,
+  type HumanCertificationReview,
+} from "./certification/certify.js";
+import { deriveCertificationProofPlan } from "./certification/plan.js";
+import { runMachineChecks } from "./certification/machine-checks.js";
 import type {
   CanonRevisionReference,
   CertificationEvidence,
@@ -12,13 +20,19 @@ import type {
   DesignIntentLifecycleRecord,
   DesignReviewEvidence,
   ImplementationLink,
+  MachineTransitionContext,
+  MachineTransitionEvent,
+  MachineTransitionRequest,
+  MachineTransitionResult,
+  RepositoryRevisionReference,
 } from "./contracts.js";
-import type { DesignIntentPorts } from "./ports.js";
-import {
-  createDesignChangeLifecycleMachine,
-  type DesignChangeLifecycleEvent,
-  type DesignChangeLifecycleFacts,
-} from "./lifecycle/machine.js";
+import { decodeImplementationLink } from "./linkage/codec.js";
+import { evaluateCoverage, type ImplementationCompletionEvidence } from "./linkage/coverage.js";
+import type { DesignIntentPorts, GitPort, MachinePort } from "./ports.js";
+import type { DesignAmendmentTransaction } from "./review/service.js";
+import { DesignPromotionService, type PromotionSuccess, type PromoteDesignInput } from "./promotion/service.js";
+import type { RepositoryEvidenceInput } from "./certification/evidence.js";
+import type { DesignChangeLifecycleEvent, DesignChangeLifecycleFacts } from "./lifecycle/machine.js";
 
 /** Inputs accepted by the application boundary when authoring a new proposal. */
 export type DesignChangeCreateInput = DesignChangeSet | DesignChangeSetPayload | DesignChangeAuthoringInput;
@@ -47,6 +61,69 @@ export class DesignApplicationError extends Error {
     this.name = "DesignApplicationError";
     this.code = code;
   }
+}
+
+/** Raw inputs accepted by the production certification pipeline. */
+export interface DesignCertificationInput {
+  readonly changeId: string;
+  readonly implementationRevision: RepositoryRevisionReference;
+  readonly repositoryEvidence?: RepositoryEvidenceInput | unknown;
+  readonly completionEvidence?: readonly ImplementationCompletionEvidence[];
+  readonly integrationRevision?: RepositoryRevisionReference;
+  readonly implementationSubject?: GitImplementationSubject | readonly GitImplementationSubject[];
+  readonly humanReviews?: readonly HumanCertificationReview[];
+  readonly codeIntent?: readonly CodeIntent[];
+  readonly certificationId?: string;
+  readonly recordedAt?: string;
+}
+
+export interface DesignApplicationTransactionInput {
+  readonly change?: DesignChangeSet;
+  readonly lifecycle?: DesignIntentLifecycleRecord;
+  readonly review?: DesignReviewEvidence;
+  readonly implementation?: ImplementationLink;
+  readonly certification?: CertificationEvidence;
+}
+
+/** Atomic storage composition supplied by the repository adapter. */
+export interface DesignApplicationTransaction {
+  commit(input: DesignApplicationTransactionInput): Promise<void>;
+}
+
+export interface DesignApplicationRecovery {
+  recover(changeId?: string): Promise<unknown>;
+}
+
+/** The lifecycle machine is the sole state-transition authority. */
+export interface DesignLifecycleMachinePort extends MachinePort {
+  readonly initialState: () => DesignChangeLifecycleState;
+}
+
+export interface DesignReviewDelegate {
+  amend(
+    changeId: string,
+    payload: DesignChangeSetPayload,
+    proposalRevision?: string,
+  ): Promise<{ change: DesignChangeSet }>;
+  recordReview(evidence: DesignReviewEvidence): Promise<DesignIntentLifecycleRecord>;
+  rework(changeId: string): Promise<DesignIntentLifecycleRecord>;
+}
+
+export interface DesignApplicationDependencies {
+  /** #209 review/amend service. */
+  readonly review?: DesignReviewDelegate;
+  /** Transaction used by #209 for semantic amendments. */
+  readonly amendmentTransaction?: DesignAmendmentTransaction;
+  /** Shared transaction boundary for link/certification writes. */
+  readonly transaction?: DesignApplicationTransaction;
+  /** #216 production promotion service. */
+  readonly promotion?: Pick<DesignPromotionService, "promote">;
+  /** #207 explicit recovery service. */
+  readonly recovery?: DesignApplicationRecovery;
+  /** Repository ancestry capability used by #211 coverage. */
+  readonly git?: GitPort;
+  /** XState-backed lifecycle adapter; the facade never constructs the machine. */
+  readonly machine?: DesignLifecycleMachinePort;
 }
 
 interface ResolvedFacts {
@@ -94,78 +171,6 @@ function inputChangeId(value: DesignChangeCreateInput | DesignChangeAmendInput):
   return changeId;
 }
 
-function assertReview(evidence: DesignReviewEvidence, change: DesignChangeSet): void {
-  if (!isRecord(evidence)) throw new DesignApplicationError("invalid-evidence", "review evidence must be an object");
-  if (evidence.changeId !== change.changeId || evidence.proposalDigest !== change.digest) {
-    throw new DesignApplicationError(
-      "stale-evidence",
-      `review ${evidence.reviewId} is not bound to the current proposal`,
-    );
-  }
-  text(evidence.reviewId, "reviewId");
-  text(evidence.proposalRevision, "proposalRevision");
-  text(evidence.actor, "actor");
-  text(evidence.reason, "reason");
-  text(evidence.timestamp, "timestamp");
-  if (
-    evidence.decision !== "approved" &&
-    evidence.decision !== "changes-requested" &&
-    evidence.decision !== "rejected"
-  ) {
-    throw new DesignApplicationError("invalid-evidence", `review ${evidence.reviewId} has an unsupported decision`);
-  }
-}
-
-function assertLink(link: ImplementationLink, change: DesignChangeSet): void {
-  if (!isRecord(link)) throw new DesignApplicationError("invalid-evidence", "implementation link must be an object");
-  if (link.changeId !== change.changeId || link.changeDigest !== change.digest) {
-    throw new DesignApplicationError("stale-evidence", `implementation link ${link.linkId} is not current`);
-  }
-  text(link.linkId, "linkId");
-  if (!Array.isArray(link.targetEntryKeys) || link.targetEntryKeys.length === 0) {
-    throw new DesignApplicationError("invalid-evidence", `implementation link ${link.linkId} has no targets`);
-  }
-}
-
-function assertCertification(evidence: CertificationEvidence, change: DesignChangeSet): void {
-  if (!isRecord(evidence)) {
-    throw new DesignApplicationError("invalid-evidence", "certification evidence must be an object");
-  }
-  if (evidence.changeId !== change.changeId || evidence.changeDigest !== change.digest) {
-    throw new DesignApplicationError(
-      "stale-evidence",
-      `certification ${evidence.certificationId} is not bound to the current proposal`,
-    );
-  }
-  text(evidence.certificationId, "certificationId");
-  text(evidence.implementationRevision.repository, "implementationRevision.repository");
-  text(evidence.implementationRevision.revision, "implementationRevision.revision");
-  text(evidence.recordedAt, "recordedAt");
-  if (evidence.result !== "match" && evidence.result !== "mismatch" && evidence.result !== "unresolved") {
-    throw new DesignApplicationError(
-      "invalid-evidence",
-      `certification ${evidence.certificationId} has an invalid result`,
-    );
-  }
-  if (!Array.isArray(evidence.checks) || evidence.checks.length === 0) {
-    throw new DesignApplicationError("invalid-evidence", `certification ${evidence.certificationId} has no checks`);
-  }
-  const ids = new Set<string>();
-  for (const check of evidence.checks) {
-    text(check.checkId, "certification checkId");
-    if (check.result !== "match" && check.result !== "mismatch" && check.result !== "unresolved") {
-      throw new DesignApplicationError(
-        "invalid-evidence",
-        `certification check ${check.checkId} has an invalid result`,
-      );
-    }
-    if (ids.has(check.checkId)) {
-      throw new DesignApplicationError("invalid-evidence", `duplicate certification check ${check.checkId}`);
-    }
-    ids.add(check.checkId);
-  }
-}
-
 function sameRevision(left: CanonRevisionReference, right: CanonRevisionReference): boolean {
   return (
     left.repositoryRevision === right.repositoryRevision &&
@@ -198,17 +203,20 @@ function lifecycleFacts(facts: ResolvedFacts): DesignChangeLifecycleFacts {
   };
 }
 
-function allChecksMatch(certification: CertificationEvidence | undefined): boolean {
-  return (
-    certification?.result === "match" &&
-    certification.checks.length > 0 &&
-    certification.checks.every((check) => check.result === "match")
-  );
+function unsupported(message: string): never {
+  throw new DesignApplicationError("unsupported-operation", message);
 }
 
-/** Compose all Design lifecycle mutations through the fixed repository ports. */
+/** Compose Design lifecycle operations through the fixed repository/domain ports. */
 export class DesignApplicationService {
-  constructor(private readonly ports: DesignIntentPorts) {}
+  private readonly dependencies: DesignApplicationDependencies;
+
+  constructor(
+    private readonly ports: DesignIntentPorts,
+    dependencies: DesignApplicationDependencies = {},
+  ) {
+    this.dependencies = dependencies;
+  }
 
   /** Author and persist a new draft after validating the exact current Canon. */
   async create(input: DesignChangeCreateInput): Promise<DesignChangeSet> {
@@ -216,72 +224,48 @@ export class DesignApplicationService {
     if ((await this.ports.changeStore.read(changeId)) !== undefined) {
       throw new DesignApplicationError("change-already-exists", `Design Change ${changeId} already exists`);
     }
-
     const canon = await this.readCurrentCanon();
     const change = await this.resolveChange(input, canon);
-    const lifecycle = recordFor({ change, implementations: [] }, "draft");
-
-    // All codec/machine/domain checks complete before either repository port is written.
+    const lifecycle = recordFor({ change, implementations: [] }, this.initialState());
     await this.ports.changeStore.write(change);
     await this.ports.lifecycle.write(lifecycle);
     return change;
   }
 
-  /** Amend a proposal; semantic changes invalidate current review/link/certification evidence. */
+  /** Amend through #209's XState AMEND transaction; no local state decision is made here. */
   async amend(changeId: string, input: DesignChangeAmendInput): Promise<DesignChangeSet> {
     text(changeId, "changeId");
     if (inputChangeId(input) !== changeId) {
       throw new DesignApplicationError("invalid-change", "amended Design Change must retain its changeId");
     }
     const current = await this.readChange(changeId);
-    const currentLifecycle = await this.ports.lifecycle.read(changeId);
-    if (currentLifecycle !== undefined && currentLifecycle.changeDigest !== current.digest) {
-      throw new DesignApplicationError("stale-lifecycle", `lifecycle for ${changeId} is stale`);
-    }
-    if (currentLifecycle?.state === "promoted") {
-      throw new DesignApplicationError("unsupported-operation", "a promoted Design Change cannot be amended");
-    }
     const canon = await this.readCurrentCanon();
     const next = await this.resolveChange(input, canon);
     if (next.digest === current.digest) return current;
-
-    const lifecycle = recordFor({ change: next, implementations: [] }, "draft");
-    await this.ports.changeStore.write(next);
-    await this.ports.lifecycle.write(lifecycle);
-    return next;
+    const review = this.dependencies.review;
+    if (review === undefined) {
+      return unsupported("semantic amendment requires the #209 review service and atomic transaction");
+    }
+    const proposalRevision =
+      isRecord(input) && typeof input.proposalRevision === "string"
+        ? input.proposalRevision
+        : next.base.repositoryRevision;
+    const result = await review.amend(changeId, payloadOf(next), proposalRevision);
+    return result.change;
   }
 
-  /** Enter design review. */
+  /** Enter design review through the canonical lifecycle transition. */
   async submit(changeId: string): Promise<DesignIntentLifecycleRecord> {
     return this.transition(changeId, { type: "SUBMIT_FOR_DESIGN_REVIEW" });
   }
 
-  /** Record immutable review evidence and apply its approval/rework transition. */
+  /** Record immutable review evidence through #208 codec and #209 service. */
   async review(evidence: DesignReviewEvidence): Promise<DesignIntentLifecycleRecord> {
-    const change = await this.readChange(evidence.changeId);
-    assertReview(evidence, change);
-    const reviews = await this.ports.reviews.list(change.changeId);
-    if (reviews.some((entry) => entry.reviewId === evidence.reviewId)) {
-      throw new DesignApplicationError("duplicate-evidence", `review ${evidence.reviewId} already exists`);
-    }
-    const facts = await this.readFacts(change, { review: evidence, reviews });
-    const event: DesignChangeLifecycleEvent =
-      evidence.decision === "approved" ? { type: "DESIGN_REVIEW_APPROVED" } : { type: "DESIGN_REVIEW_REWORK" };
-    const state = this.nextState(facts, event);
-    const rework = evidence.decision !== "approved";
-    const lifecycle = recordFor(
-      {
-        change,
-        review: rework ? undefined : evidence,
-        implementations: rework ? [] : facts.implementations,
-        certification: rework ? undefined : facts.certification,
-      },
-      state,
-    );
-    // The transition is evaluated before recording evidence, so rejected input commits nothing.
-    await this.ports.reviews.record(evidence);
-    await this.ports.lifecycle.write(lifecycle);
-    return lifecycle;
+    const { validateDesignReviewEvidence } = await import("./review/codec.js");
+    const decoded = validateDesignReviewEvidence(evidence);
+    const service = this.dependencies.review;
+    if (service === undefined) return unsupported("review requires the #209 review service");
+    return service.recordReview(decoded);
   }
 
   /** Enter implementation only when current approval evidence satisfies machine guards. */
@@ -289,88 +273,152 @@ export class DesignApplicationService {
     return this.transition(changeId, { type: "START_IMPLEMENTATION" });
   }
 
-  /** Record one exact-proposal external Implementation link. */
-  async link(link: ImplementationLink): Promise<DesignIntentLifecycleRecord> {
-    const change = await this.readChange(link.changeId);
-    assertLink(link, change);
+  /** Decode and persist one exact-proposal external Implementation link. */
+  async link(value: unknown): Promise<DesignIntentLifecycleRecord> {
+    if (!isRecord(value)) return unsupported("implementation link must be an object");
+    const changeId = text(value.changeId, "changeId");
+    const change = await this.readChange(changeId);
+    const link = decodeImplementationLink(value, { changeId: change.changeId, digest: change.digest });
     const facts = await this.readFacts(change);
     if (facts.state !== "implementing") {
       throw new DesignApplicationError("illegal-transition", `cannot link an Implementation from ${facts.state}`);
     }
-    if (facts.implementations.some((entry) => entry.linkId === link.linkId)) {
-      throw new DesignApplicationError("duplicate-evidence", `implementation link ${link.linkId} already exists`);
-    }
     const implementations = [...facts.implementations, link];
     const lifecycle = recordFor({ ...facts, implementations }, facts.state);
-    await this.ports.implementations.record(link);
-    await this.ports.lifecycle.write(lifecycle);
+    if (this.dependencies.transaction === undefined) {
+      return unsupported("implementation linkage requires the StorePort transaction boundary");
+    }
+    await this.dependencies.transaction.commit({ implementation: link, lifecycle });
     return lifecycle;
   }
 
-  /** Record certification/check outcomes, then enter certification review. */
-  async certify(evidence: CertificationEvidence): Promise<DesignIntentLifecycleRecord> {
-    const change = await this.readChange(evidence.changeId);
-    assertCertification(evidence, change);
-    const facts = await this.readFacts(change, { certification: evidence });
-    const state = this.nextState(facts, { type: "SUBMIT_FOR_CERTIFICATION" });
-    const lifecycle = recordFor({ ...facts, certification: evidence }, state);
-    await this.ports.certification.record(evidence);
-    await this.ports.lifecycle.write(lifecycle);
-    return lifecycle;
-  }
-
-  /** Apply review or certification rework according to the persisted current evidence. */
-  async rework(changeId: string): Promise<DesignIntentLifecycleRecord> {
-    const facts = await this.readFacts(await this.readChange(changeId));
-    const event: DesignChangeLifecycleEvent =
-      facts.state === "design-review"
-        ? { type: "DESIGN_REVIEW_REWORK" }
-        : facts.state === "certification-review"
-          ? { type: "CERTIFICATION_REWORK" }
-          : (() => {
-              throw new DesignApplicationError("illegal-transition", `cannot rework from ${facts.state}`);
-            })();
-    const state = this.nextState(facts, event);
-    const lifecycle = recordFor(facts, state);
-    await this.ports.lifecycle.write(lifecycle);
-    return lifecycle;
-  }
-
-  /** Promote only a certified proposal whose every check is a match. */
-  async promote(changeId: string): Promise<DesignIntentLifecycleRecord> {
-    const facts = await this.readFacts(await this.readChange(changeId));
-    if (!allChecksMatch(facts.certification)) {
+  /** Run #212 -> #211/#213 -> #214, then persist only its derived result. */
+  async certify(input: DesignCertificationInput): Promise<DesignIntentLifecycleRecord> {
+    if (!isRecord(input)) return unsupported("certification input must be an object");
+    if ("result" in input || "checks" in input) {
       throw new DesignApplicationError(
-        "illegal-transition",
-        "promotion requires complete matching certification checks",
+        "invalid-evidence",
+        "certify accepts raw inputs, not final CertificationEvidence",
       );
     }
-    const state = this.nextState(facts, { type: "PROMOTE" });
-    const lifecycle = recordFor(facts, state);
-    await this.ports.lifecycle.write(lifecycle);
+    if (this.dependencies.transaction === undefined) {
+      return unsupported("certification requires the StorePort transaction boundary");
+    }
+    const change = await this.readChange(input.changeId);
+    const facts = await this.readFacts(change);
+    if (facts.state !== "implementing") {
+      throw new DesignApplicationError("illegal-transition", `cannot certify from ${facts.state}`);
+    }
+    const target = await this.targetCanon(change);
+    const plan = deriveCertificationProofPlan({
+      change,
+      canon: target,
+      implementationRevision: input.implementationRevision,
+      implementations: facts.implementations,
+      codeIntent: input.codeIntent,
+    });
+    const coverage = await evaluateCoverage({
+      change,
+      links: facts.implementations,
+      completionEvidence: input.completionEvidence,
+      integrationRevision: input.integrationRevision,
+      git: this.dependencies.git,
+    });
+    const machine = runMachineChecks({
+      document: target,
+      codeIntent: input.codeIntent,
+      evidence: input.repositoryEvidence,
+      expectedRepository: input.implementationRevision,
+    });
+    const validation = validateArchitectureDocument(target);
+    const requiredMachineIds = new Set(
+      plan.obligations.filter((obligation) => obligation.mode === "machine").map((obligation) => obligation.id),
+    );
+    const producedMachineChecks = machine.checks.map((check) => {
+      const obligation = plan.obligations.find(
+        (candidate) =>
+          candidate.mode === "machine" &&
+          candidate.targetEntryKey !== undefined &&
+          candidate.targetEntryKey === check.targetEntryKey,
+      );
+      return obligation === undefined ? check : { ...check, checkId: obligation.id };
+    });
+    const machineChecks = [
+      ...producedMachineChecks.filter((check) => requiredMachineIds.has(check.checkId)),
+      {
+        checkId: "canon-validity",
+        result: validation.valid ? ("match" as const) : ("mismatch" as const),
+        detail: validation.valid ? "target Canon is valid" : "target Canon is invalid",
+      },
+      {
+        checkId: "linked-target-coverage",
+        result: coverage.result,
+        detail: coverage.findings.map((finding) => finding.detail).join("; ") || "all targets are covered",
+      },
+      {
+        checkId: "source-revision-binding",
+        result: coverage.complete ? ("match" as const) : ("unresolved" as const),
+        detail: coverage.complete ? "completion evidence is revision-bound" : "completion evidence is incomplete",
+      },
+    ];
+    const aggregation = aggregateCertification({
+      plan,
+      change,
+      targetCanon: target,
+      implementationLinks: facts.implementations,
+      implementationSubject: input.implementationSubject,
+      machineChecks,
+      humanReviews: input.humanReviews,
+      certificationId: input.certificationId,
+      recordedAt: input.recordedAt,
+    });
+    const eventFacts: ResolvedFacts = { ...facts, certification: aggregation.evidence };
+    const state = this.nextState(eventFacts, { type: "SUBMIT_FOR_CERTIFICATION" });
+    const lifecycle = recordFor(eventFacts, state);
+    await this.dependencies.transaction.commit({ certification: aggregation.evidence, lifecycle });
     return lifecycle;
   }
 
-  /** Re-read and validate one persisted lifecycle projection without retrying stale reads. */
-  async recover(changeId: string): Promise<DesignIntentLifecycleRecord> {
-    const change = await this.readChange(changeId);
-    const facts = await this.readFacts(change);
-    if (facts.lifecycle !== undefined) return recordFor(facts, facts.lifecycle.state);
-    return recordFor(facts, "draft");
+  /** Apply canonical review/lifecycle rework. */
+  async rework(changeId: string): Promise<DesignIntentLifecycleRecord> {
+    const service = this.dependencies.review;
+    if (service === undefined) return unsupported("rework requires the #209 review service");
+    return service.rework(changeId);
   }
 
-  // Explicit aliases keep command adapters from reimplementing lifecycle naming.
+  /** Delegate promotion to #216; this method does not write lifecycle/current Canon state. */
+  async promote(changeId: string): Promise<PromotionSuccess> {
+    const service = this.dependencies.promotion;
+    if (service === undefined) return unsupported("promotion requires the #216 production promotion service");
+    const change = await this.readChange(changeId);
+    const facts = await this.readFacts(change);
+    const target = await this.targetCanon(change);
+    const promotionTransition = facts.state === "promoted" ? facts.state : this.nextState(facts, { type: "PROMOTE" });
+    const certification = facts.certification;
+    const input: PromoteDesignInput = {
+      changeId,
+      certifiedTarget: target,
+      promotionTransition: { state: promotionTransition },
+      ...(certification === undefined ? {} : { implementationRevision: certification.implementationRevision }),
+    };
+    return service.promote(input);
+  }
+
+  /** Delegate explicit recovery to #207; normal reads are never retried here. */
+  async recover(changeId?: string): Promise<unknown> {
+    const recovery = this.dependencies.recovery;
+    if (recovery === undefined) return unsupported("recovery requires the #207 transaction recovery service");
+    return recovery.recover(changeId);
+  }
+
   submitForDesignReview(changeId: string) {
     return this.submit(changeId);
   }
   startImplementation(changeId: string) {
     return this.start(changeId);
   }
-  linkImplementation(link: ImplementationLink) {
+  linkImplementation(link: unknown) {
     return this.link(link);
-  }
-  recordCertification(evidence: CertificationEvidence) {
-    return this.certify(evidence);
   }
 
   private async transition(changeId: string, event: DesignChangeLifecycleEvent): Promise<DesignIntentLifecycleRecord> {
@@ -383,19 +431,52 @@ export class DesignApplicationService {
   }
 
   private nextState(facts: ResolvedFacts, event: DesignChangeLifecycleEvent): DesignChangeLifecycleState {
-    const input = { ...lifecycleFacts(facts), initialState: facts.state };
-    const actor = createActor(createDesignChangeLifecycleMachine(input), { input });
-    actor.start();
-    actor.send(event);
-    const snapshot = actor.getSnapshot();
-    actor.stop();
-    if (snapshot.context.lastError !== undefined) {
-      throw new DesignApplicationError("illegal-transition", `event ${event.type} is not allowed from ${facts.state}`);
-    }
-    if (typeof snapshot.value !== "string") {
-      throw new DesignApplicationError("illegal-transition", "lifecycle machine returned an invalid state");
-    }
-    return snapshot.value as DesignChangeLifecycleState;
+    const machine = this.dependencies.machine;
+    if (machine === undefined) return unsupported("lifecycle operation requires the MachinePort authority");
+    const machineEvent: MachineTransitionEvent = {
+      changeId: facts.change.changeId,
+      sequence: 0,
+      previousEventDigest: facts.change.digest,
+      recordedAt: "1970-01-01T00:00:00.000Z",
+      kind: event.type,
+      type: event.type,
+      event: event.type,
+      payload: { type: event.type },
+      eventDigest: digestJson({
+        changeId: facts.change.changeId,
+        sequence: 0,
+        previousEventDigest: facts.change.digest,
+        recordedAt: "1970-01-01T00:00:00.000Z",
+        kind: event.type,
+        type: event.type,
+        event: event.type,
+        payload: { type: event.type },
+      }),
+    };
+    const context = {
+      changeId: facts.change.changeId,
+      proposalDigest: facts.change.digest,
+      ...(facts.review === undefined ? {} : { proposalRevision: facts.review.proposalRevision, review: facts.review }),
+      implementations: facts.implementations,
+      ...(facts.certification === undefined ? {} : { certification: facts.certification }),
+    };
+    const result =
+      machine.transition.length >= 2
+        ? (
+            machine.transition as (
+              state: DesignChangeLifecycleState,
+              event: MachineTransitionEvent,
+              context: MachineTransitionContext,
+            ) => MachineTransitionResult | DesignChangeLifecycleState
+          )(facts.state, machineEvent, context)
+        : (
+            machine.transition as (
+              request: MachineTransitionRequest,
+            ) => MachineTransitionResult | DesignChangeLifecycleState
+          )({ state: facts.state, event: machineEvent, context });
+    const state = typeof result === "string" ? result : result.state;
+    if (typeof state !== "string") throw new DesignApplicationError("illegal-transition", "invalid lifecycle state");
+    return state as DesignChangeLifecycleState;
   }
 
   private async resolveChange(
@@ -429,6 +510,18 @@ export class DesignApplicationService {
     return change;
   }
 
+  private async targetCanon(change: DesignChangeSet): Promise<CanonRead["document"]> {
+    const base = await this.ports.canon.readAt(change.base);
+    const target = await this.ports.changes.apply(payloadOf(change), base);
+    if (architectureCanonDigest(target) !== change.target.targetCanonDigest) {
+      throw new DesignApplicationError(
+        "invalid-change",
+        "Design Change target digest does not match the applied Canon",
+      );
+    }
+    return target;
+  }
+
   private async readCurrentCanon(): Promise<CanonRead> {
     const current = await this.ports.canon.readCurrent();
     if (architectureCanonDigest(current.document) !== current.revision.canonDigest) {
@@ -447,48 +540,52 @@ export class DesignApplicationService {
     return change;
   }
 
-  private async readFacts(
-    change: DesignChangeSet,
-    overrides: {
-      readonly review?: DesignReviewEvidence;
-      readonly reviews?: readonly DesignReviewEvidence[];
-      readonly certification?: CertificationEvidence;
-    } = {},
-  ): Promise<ResolvedFacts> {
+  private async readFacts(change: DesignChangeSet): Promise<ResolvedFacts> {
     const lifecycle = await this.ports.lifecycle.read(change.changeId);
     if (lifecycle !== undefined && lifecycle.changeDigest !== change.digest) {
       throw new DesignApplicationError("stale-lifecycle", `lifecycle for ${change.changeId} is stale`);
     }
-    const reviews = overrides.reviews ?? (await this.ports.reviews.list(change.changeId));
-    const currentReviews = reviews.filter(
-      (entry) => entry.changeId === change.changeId && entry.proposalDigest === change.digest,
-    );
-    const review = overrides.review ?? currentReviews.at(-1);
+    const reviews = await this.ports.reviews.list(change.changeId);
+    const review = reviews
+      .filter((entry) => entry.changeId === change.changeId && entry.proposalDigest === change.digest)
+      .at(-1);
     const implementations = (await this.ports.implementations.list(change.changeId)).filter(
       (entry) => entry.changeId === change.changeId && entry.changeDigest === change.digest,
     );
-    const storedCertification = await this.ports.certification.read(change.changeId);
+    const certification = await this.ports.certification.read(change.changeId);
     if (
-      storedCertification !== undefined &&
-      (storedCertification.changeId !== change.changeId || storedCertification.changeDigest !== change.digest)
+      certification !== undefined &&
+      (certification.changeId !== change.changeId || certification.changeDigest !== change.digest)
     ) {
       throw new DesignApplicationError("stale-evidence", `certification for ${change.changeId} is stale`);
     }
-    const certification = overrides.certification ?? storedCertification;
     return {
       change,
       lifecycle,
-      state: lifecycle?.state ?? "draft",
+      state: lifecycle?.state ?? this.initialState(),
       review,
       implementations,
       certification,
     };
   }
+
+  private initialState(): DesignChangeLifecycleState {
+    const machine = this.dependencies.machine;
+    if (machine === undefined) return unsupported("lifecycle operation requires the MachinePort authority");
+    const state = machine.initialState();
+    if (typeof state !== "string") throw new DesignApplicationError("illegal-transition", "invalid lifecycle state");
+    return state;
+  }
 }
 
-/** Factory used by command adapters and tests; no filesystem or network is created here. */
-export function createDesignApplication(ports: DesignIntentPorts): DesignApplicationService {
-  return new DesignApplicationService(ports);
+export function createDesignApplication(
+  ports: DesignIntentPorts,
+  dependencies: DesignApplicationDependencies = {},
+): DesignApplicationService {
+  return new DesignApplicationService(ports, dependencies);
 }
 
 export const createDesignApplicationService = createDesignApplication;
+
+/** Type-only export documenting the production result used by certification composition. */
+export type DesignCertificationResult = CertificationAggregationResult;
