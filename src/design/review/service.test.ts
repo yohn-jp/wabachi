@@ -128,20 +128,41 @@ test("a semantic amendment invalidates approval and returns certification review
     implementations: [],
     review: review(current),
   });
-  const service = new DesignReviewService(state.value);
+  let event: { readonly kind?: string } | undefined;
+  const service = new DesignReviewService(state.value, {
+    proposalRevisions: {
+      async read(_changeId, revision) {
+        return revision === current.digest ? current : undefined;
+      },
+    },
+    amendmentTransaction: {
+      async commit(change, lifecycle, amendmentEvent) {
+        event = amendmentEvent;
+        await state.value.changeStore.write(change);
+        await state.value.lifecycle.write(lifecycle);
+      },
+    },
+  });
 
-  const amended = await service.amend(current.changeId, payload(current.changeId, "two"));
+  const amended = await service.amend(current.changeId, payload(current.changeId, "two"), "amended-commit");
   assert.equal(amended.changed, true);
   assert.equal(amended.lifecycle?.state, "draft");
   await assert.rejects(service.selectApproval(current.changeId));
   assert.equal(state.change.digest, amended.change.digest);
+  assert.equal(event?.kind, "AMEND");
 });
 
 test("normalization-only amendment is a no-op and preserves approval", async () => {
   const first = payload();
   const current = createDesignChangeSet(first);
   const state = ports(current, [review(current)]);
-  const service = new DesignReviewService(state.value);
+  const service = new DesignReviewService(state.value, {
+    proposalRevisions: {
+      async read(_changeId, revision) {
+        return revision === current.digest ? current : undefined;
+      },
+    },
+  });
   const reordered = { ...first, base: { ...first.base }, target: { ...first.target } };
 
   const result = await service.amend(current.changeId, reordered);
@@ -153,10 +174,84 @@ test("normalization-only amendment is a no-op and preserves approval", async () 
 test("changes-requested records history and returns the lifecycle to draft", async () => {
   const current = createDesignChangeSet(payload());
   const state = ports(current, [review(current)]);
-  const service = new DesignReviewService(state.value);
+  const service = new DesignReviewService(state.value, {
+    proposalRevisions: {
+      async read(_changeId, revision) {
+        return revision === current.digest ? current : undefined;
+      },
+    },
+  });
 
   const lifecycle = await service.recordReview(review(current, "changes-requested"));
   assert.equal(lifecycle.state, "draft");
   assert.equal((await state.value.reviews.list(current.changeId)).length, 2);
   await assert.rejects(service.assertImplementationAuthorized(current.changeId));
+});
+
+test("approval fails closed when no immutable proposal revision reader is available", async () => {
+  const current = createDesignChangeSet(payload());
+  const state = ports(current, [review(current)]);
+  const service = new DesignReviewService(state.value);
+
+  await assert.rejects(service.selectApproval(current.changeId), (error: unknown) => {
+    return error instanceof DesignReviewError && error.code === "approval-not-current";
+  });
+});
+
+test("semantic amendment refuses a non-atomic persistence fallback", async () => {
+  const current = createDesignChangeSet(payload());
+  const state = ports(current);
+  const service = new DesignReviewService(state.value, {
+    proposalRevisions: {
+      async read() {
+        return current;
+      },
+    },
+  });
+
+  await assert.rejects(
+    service.amend(current.changeId, payload(current.changeId, "two"), "amended-commit"),
+    (error: unknown) => {
+      return error instanceof DesignReviewError && error.code === "atomic-transaction-required";
+    },
+  );
+  assert.equal(state.change.digest, current.digest);
+});
+
+test("certification rework delegates to the XState implementing transition", async () => {
+  const current = createDesignChangeSet(payload());
+  const state = ports(current, [review(current)], {
+    changeId: current.changeId,
+    changeDigest: current.digest,
+    state: "certification-review",
+    implementations: [
+      {
+        linkId: "link-1",
+        changeId: current.changeId,
+        changeDigest: current.digest,
+        implementation: { repositoryHost: "github.com", repositoryId: "1", number: 1 },
+        targetEntryKeys: [],
+      },
+    ],
+    review: review(current),
+    certification: {
+      certificationId: "cert-1",
+      changeId: current.changeId,
+      changeDigest: current.digest,
+      implementationRevision: { repository: "repo", revision: "commit" },
+      result: "mismatch",
+      checks: [],
+      recordedAt: "2026-09-21T00:00:00.000Z",
+    },
+  });
+  const service = new DesignReviewService(state.value, {
+    proposalRevisions: {
+      async read() {
+        return current;
+      },
+    },
+  });
+
+  const lifecycle = await service.requestRework(current.changeId);
+  assert.equal(lifecycle.state, "implementing");
 });

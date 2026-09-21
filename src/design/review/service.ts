@@ -1,3 +1,4 @@
+import { createActor } from "xstate";
 import { digestJson } from "../digest.js";
 import type {
   DesignChangeSet,
@@ -6,6 +7,13 @@ import type {
   DesignReviewEvidence,
 } from "../contracts.js";
 import type { DesignIntentPorts } from "../ports.js";
+import {
+  createDesignChangeLifecycleMachine,
+  type DesignChangeLifecycleEvent,
+  type DesignChangeLifecycleFacts,
+  type DesignChangeLifecycleInput,
+} from "../lifecycle/machine.js";
+import { createDesignChangeEvent, type DesignChangeEvent } from "../lifecycle/record.js";
 
 /** A revision reader is optional, but when supplied it must reproduce the reviewed proposal bytes. */
 export interface ProposalRevisionReader {
@@ -14,13 +22,13 @@ export interface ProposalRevisionReader {
 
 /** An adapter can persist the amended change and lifecycle record atomically. */
 export interface DesignAmendmentTransaction {
-  commit(change: DesignChangeSet, lifecycle: DesignIntentLifecycleRecord): Promise<void>;
+  commit(change: DesignChangeSet, lifecycle: DesignIntentLifecycleRecord, event: DesignChangeEvent): Promise<void>;
 }
 
 export interface DesignReviewServiceOptions {
   /** Reads the immutable proposal bytes identified by review.proposalRevision. */
   readonly proposalRevisions?: ProposalRevisionReader;
-  /** Persists an amendment as one repository transaction when the storage provides one. */
+  /** Persists an amendment and its AMEND event as one repository transaction. */
   readonly amendmentTransaction?: DesignAmendmentTransaction;
 }
 
@@ -112,9 +120,9 @@ export class DesignReviewService {
       );
     }
 
-    await this.ports.reviews.record(evidence);
     const previous = await this.ports.lifecycle.read(change.changeId);
     const lifecycle = this.lifecycleForReview(change, previous, evidence);
+    await this.ports.reviews.record(evidence);
     await this.ports.lifecycle.write(lifecycle);
     return lifecycle;
   }
@@ -133,11 +141,11 @@ export class DesignReviewService {
       throw new DesignReviewError("stale-lifecycle", `lifecycle record for ${changeId} is stale`);
     }
 
+    const state = this.stateForApproval(change, previous, evidence);
     const lifecycle: DesignIntentLifecycleRecord = {
       changeId,
       changeDigest: change.digest,
-      state:
-        previous?.state === "implementing" || previous?.state === "certification-review" ? previous.state : "approved",
+      state,
       review: evidence,
       implementations: previous?.implementations ?? [],
       certification: previous?.certification,
@@ -169,7 +177,7 @@ export class DesignReviewService {
    * implementation links, and certification remain in their stores as history;
    * the new lifecycle record contains none of them and starts in draft.
    */
-  async amend(changeId: string, payload: DesignChangeSetPayload): Promise<AmendmentResult> {
+  async amend(changeId: string, payload: DesignChangeSetPayload, proposalRevision?: string): Promise<AmendmentResult> {
     const current = await this.readCurrentChange(changeId);
     if (payload.changeId !== changeId) {
       throw new DesignReviewError("change-id-mismatch", "amended proposal must retain the Change Set identity");
@@ -184,29 +192,55 @@ export class DesignReviewService {
       };
     }
 
-    const lifecycle: DesignIntentLifecycleRecord = {
+    const lifecycleBase = {
       changeId,
       changeDigest: next.digest,
-      state: "draft",
       implementations: [],
     };
-    if (this.options.amendmentTransaction !== undefined) {
-      await this.options.amendmentTransaction.commit(next, lifecycle);
-    } else {
-      await this.ports.changeStore.write(next);
-      await this.ports.lifecycle.write(lifecycle);
+    if (this.options.amendmentTransaction === undefined) {
+      throw new DesignReviewError(
+        "atomic-transaction-required",
+        "semantic amendment requires an atomic change, lifecycle, and AMEND event transaction",
+      );
     }
-    return { changed: true, change: next, lifecycle };
+    if (typeof proposalRevision !== "string" || proposalRevision.trim().length === 0) {
+      throw new DesignReviewError(
+        "proposal-revision-required",
+        "semantic amendment requires an immutable proposal revision",
+      );
+    }
+    const previous = await this.ports.lifecycle.read(changeId);
+    const state = this.transitionState(current, previous, undefined, { type: "AMEND" });
+    const amendedLifecycle: DesignIntentLifecycleRecord = { ...lifecycleBase, state };
+    const event = createDesignChangeEvent({
+      changeId,
+      sequence: 0,
+      previousEventDigest: current.digest,
+      recordedAt: new Date().toISOString(),
+      kind: "AMEND",
+      payload: { type: "AMEND", proposalDigest: next.digest, proposalRevision },
+    });
+    await this.options.amendmentTransaction.commit(next, amendedLifecycle, event);
+    return { changed: true, change: next, lifecycle: amendedLifecycle };
   }
 
-  /** Moves the current proposal to draft while retaining review history. */
+  /** Applies the machine's explicit rework transition while retaining review history. */
   async requestRework(changeId: string): Promise<DesignIntentLifecycleRecord> {
     const change = await this.readCurrentChange(changeId);
+    const previous = await this.ports.lifecycle.read(changeId);
+    const state = previous?.state;
+    const event: DesignChangeLifecycleEvent | undefined =
+      state === "design-review"
+        ? { type: "DESIGN_REVIEW_REWORK" }
+        : state === "certification-review"
+          ? { type: "CERTIFICATION_REWORK" }
+          : undefined;
+    const nextState = this.transitionState(change, previous, undefined, event);
     const lifecycle: DesignIntentLifecycleRecord = {
       changeId,
       changeDigest: change.digest,
-      state: "draft",
-      implementations: [],
+      state: nextState,
+      implementations: nextState === "implementing" ? (previous?.implementations ?? []) : [],
     };
     await this.ports.lifecycle.write(lifecycle);
     return lifecycle;
@@ -236,9 +270,9 @@ export class DesignReviewService {
     if (typeof review.proposalRevision !== "string" || review.proposalRevision.trim().length === 0) return false;
     if (expectedProposalRevision !== undefined && review.proposalRevision !== expectedProposalRevision) return false;
     if (this.options.proposalRevisions === undefined) {
-      // Without a repository revision reader, the semantic digest is the only
-      // reproducible byte identity available at this boundary.
-      return review.proposalRevision === current.digest;
+      // A digest is not a Git revision. Without a reader, approval is
+      // unverifiable and must fail closed.
+      return false;
     }
     try {
       const reviewed = await this.options.proposalRevisions.read(current.changeId, review.proposalRevision);
@@ -256,14 +290,74 @@ export class DesignReviewService {
     evidence: DesignReviewEvidence,
   ): DesignIntentLifecycleRecord {
     const rework = evidence.decision === "changes-requested" || evidence.decision === "rejected";
+    const state = this.stateForReview(change, previous, evidence);
     return {
       changeId: change.changeId,
       changeDigest: change.digest,
-      state: rework ? "draft" : "approved",
+      state,
       review: rework ? undefined : evidence,
       implementations: rework ? [] : (previous?.implementations ?? []),
       certification: rework ? undefined : previous?.certification,
     };
+  }
+
+  private stateForReview(
+    change: DesignChangeSet,
+    previous: DesignIntentLifecycleRecord | undefined,
+    evidence: DesignReviewEvidence,
+  ): DesignIntentLifecycleRecord["state"] {
+    const initial = previous?.state;
+    if (evidence.decision === "changes-requested" || evidence.decision === "rejected") {
+      const event = initial === "design-review" ? ({ type: "DESIGN_REVIEW_REWORK" } as const) : undefined;
+      return this.transitionState(change, previous, evidence, event);
+    }
+    const events: readonly DesignChangeLifecycleEvent[] =
+      initial === undefined || initial === "draft"
+        ? [{ type: "SUBMIT_FOR_DESIGN_REVIEW" }, { type: "DESIGN_REVIEW_APPROVED" }]
+        : initial === "design-review"
+          ? [{ type: "DESIGN_REVIEW_APPROVED" }]
+          : [];
+    return this.transitionState(change, previous, evidence, ...events);
+  }
+
+  private stateForApproval(
+    change: DesignChangeSet,
+    previous: DesignIntentLifecycleRecord | undefined,
+    evidence: DesignReviewEvidence,
+  ): DesignIntentLifecycleRecord["state"] {
+    return this.stateForReview(change, previous, evidence);
+  }
+
+  private transitionState(
+    change: DesignChangeSet,
+    previous: DesignIntentLifecycleRecord | undefined,
+    evidence?: DesignReviewEvidence,
+    ...events: readonly (DesignChangeLifecycleEvent | undefined)[]
+  ): DesignIntentLifecycleRecord["state"] {
+    const review = evidence ?? previous?.review;
+    const facts: DesignChangeLifecycleFacts = {
+      changeId: change.changeId,
+      changeDigest: change.digest,
+      ...(review === undefined ? {} : { proposalRevision: review.proposalRevision, review }),
+      implementations: previous?.implementations ?? [],
+      ...(previous?.certification === undefined ? {} : { certification: previous.certification }),
+    };
+    const input: DesignChangeLifecycleInput = { ...facts, initialState: previous?.state };
+    const machine = createDesignChangeLifecycleMachine(input);
+    const actor = createActor(machine, { input });
+    actor.start();
+    try {
+      for (const event of events) {
+        if (event !== undefined) actor.send(event);
+      }
+      const snapshot = actor.getSnapshot();
+      if (snapshot.context.lastError !== undefined) {
+        throw new DesignReviewError("illegal-transition", `lifecycle rejected ${snapshot.context.lastError.event}`);
+      }
+      return snapshot.value as DesignIntentLifecycleRecord["state"];
+    } finally {
+      actor.stop();
+    }
   }
 }
 
