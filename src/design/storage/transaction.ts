@@ -5,6 +5,7 @@ import { assertRepositoryPathBoundary } from "./paths.js";
 
 const TRANSACTION_DIRECTORY = ".transactions";
 const LOCK_FILE = "lock";
+const TAKEOVER_FILE = "takeover";
 const JOURNAL_FILE = "journal.json";
 const JOURNAL_VERSION = 1 as const;
 
@@ -104,6 +105,11 @@ interface LockHandle {
   readonly token: string;
 }
 
+interface TakeoverGate {
+  readonly file: Awaited<ReturnType<typeof open>>;
+  readonly path: string;
+}
+
 interface ResolvedTarget extends TransactionTarget {
   readonly absolutePath: string;
   readonly relativePath: string;
@@ -193,7 +199,13 @@ export async function commitTransaction(request: CommitTransactionRequest): Prom
           `target ${journalTarget.path} changed before rename; refusing to overwrite it`,
         );
       }
-      await rename(path.join(transactionDirectory, journalTarget.stage), target.absolutePath);
+      const stagePath = path.join(transactionDirectory, journalTarget.stage);
+      await assertPathBoundary(rootDir, target.absolutePath);
+      await assertPathBoundary(rootDir, stagePath);
+      if ((await digestFile(stagePath)) !== journalTarget.postDigest) {
+        throw new TransactionConflictError(`staged post-image for ${journalTarget.path} changed before rename`);
+      }
+      await rename(stagePath, target.absolutePath);
       await syncDirectory(path.dirname(target.absolutePath));
       await invokeFaultInjector(request.faultInjector, {
         transactionId,
@@ -287,6 +299,11 @@ export async function recoverTransaction(
       const digestBeforeRename = await digestFile(targetPath);
       if (digestBeforeRename !== target.expectedDigest) {
         throw new TransactionConflictError(`target ${target.path} changed during recovery`);
+      }
+      await assertPathBoundary(rootDir, targetPath);
+      await assertPathBoundary(rootDir, stagePath);
+      if ((await digestFile(stagePath)) !== target.postDigest) {
+        throw new TransactionConflictError(`post-image for ${target.path} changed during recovery`);
       }
       await rename(stagePath, targetPath);
       await syncDirectory(path.dirname(targetPath));
@@ -424,25 +441,30 @@ async function acquireLock(rootDir: string, force = false): Promise<LockHandle> 
   await assertPathBoundary(rootDir, transactionDirectory);
   await mkdir(transactionDirectory, { recursive: true });
   const lockPath = path.join(transactionDirectory, LOCK_FILE);
+  const takeoverPath = path.join(transactionDirectory, TAKEOVER_FILE);
   await assertPathBoundary(rootDir, lockPath);
+  await assertPathBoundary(rootDir, takeoverPath);
+  if (await pathExists(takeoverPath)) throw new TransactionBusyError(rootDir);
   const token = randomUUID();
   let file;
   try {
     file = await open(lockPath, "wx");
   } catch (error) {
     if (!isErrno(error, "EEXIST") || !force) throw new TransactionBusyError(rootDir);
-    await takeOverStoppedLock(lockPath);
-    try {
-      file = await open(lockPath, "wx");
-    } catch {
-      throw new TransactionBusyError(rootDir);
-    }
+    return await takeOverStoppedLock(rootDir, lockPath, takeoverPath, token);
   }
   await file.writeFile(
     JSON.stringify({ pid: process.pid, token, transactionStartedAt: new Date().toISOString() }) + "\n",
     "utf8",
   );
   await file.sync();
+  // A takeover gate may have won between the initial check and lock creation.
+  // Withdraw this writer rather than allowing it to race recovery.
+  if (await pathExists(takeoverPath)) {
+    await file.close();
+    if (await lockStillOwned(lockPath, token)) await removeIfPresent(lockPath);
+    throw new TransactionBusyError(rootDir);
+  }
   return { file, path: lockPath, rootDir, token };
 }
 
@@ -452,17 +474,95 @@ async function releaseLock(lock: LockHandle): Promise<void> {
   await syncDirectory(path.dirname(lock.path));
 }
 
-async function takeOverStoppedLock(lockPath: string): Promise<void> {
-  const owner = await readLockOwner(lockPath);
-  if (owner === undefined || isProcessRunning(owner.pid)) {
-    throw new TransactionBusyError(path.dirname(path.dirname(lockPath)));
+async function takeOverStoppedLock(
+  rootDir: string,
+  lockPath: string,
+  takeoverPath: string,
+  token: string,
+): Promise<LockHandle> {
+  let gate: TakeoverGate | undefined;
+  let primaryFile: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    try {
+      gate = { file: await open(takeoverPath, "wx"), path: takeoverPath };
+    } catch (error) {
+      if (isErrno(error, "EEXIST")) throw new TransactionBusyError(rootDir);
+      throw error;
+    }
+    await gate.file.writeFile(
+      JSON.stringify({ pid: process.pid, token, takeoverStartedAt: new Date().toISOString() }) + "\n",
+      "utf8",
+    );
+    await gate.file.sync();
+    await syncDirectory(path.dirname(takeoverPath));
+
+    const observedOwner = await readLockOwner(lockPath);
+    if (observedOwner === undefined || isProcessRunning(observedOwner.pid)) {
+      throw new TransactionBusyError(rootDir);
+    }
+    // Re-read the exact identity after proving the recorded owner is stopped.
+    // Cooperative writers also check the gate before and after opening lock.
+    const revalidatedOwner = await readLockOwner(lockPath);
+    if (
+      !sameLockOwner(observedOwner, revalidatedOwner) ||
+      revalidatedOwner === undefined ||
+      isProcessRunning(revalidatedOwner.pid)
+    ) {
+      throw new TransactionBusyError(rootDir);
+    }
+    await assertPathBoundary(rootDir, lockPath);
+    await unlink(lockPath);
+    await syncDirectory(path.dirname(lockPath));
+
+    try {
+      await assertPathBoundary(rootDir, lockPath);
+      primaryFile = await open(lockPath, "wx");
+    } catch {
+      throw new TransactionBusyError(rootDir);
+    }
+    await primaryFile.writeFile(
+      JSON.stringify({ pid: process.pid, token, transactionStartedAt: new Date().toISOString() }) + "\n",
+      "utf8",
+    );
+    await primaryFile.sync();
+    const establishedOwner = await readLockOwner(lockPath);
+    if (!sameLockOwner(establishedOwner, { pid: process.pid, token })) {
+      await primaryFile.close();
+      primaryFile = undefined;
+      throw new TransactionBusyError(rootDir);
+    }
+    await gate.file.close();
+    gate = undefined;
+    await removeIfPresent(takeoverPath);
+    await syncDirectory(path.dirname(takeoverPath));
+    const file = primaryFile;
+    primaryFile = undefined;
+    return { file, path: lockPath, rootDir, token };
+  } finally {
+    if (primaryFile !== undefined) {
+      await primaryFile.close();
+      if (await lockStillOwned(lockPath, token)) await removeIfPresent(lockPath);
+    }
+    if (gate !== undefined) {
+      await gate.file.close();
+      await removeIfPresent(gate.path);
+      await syncDirectory(path.dirname(gate.path));
+    }
   }
-  await unlink(lockPath);
+}
+
+function sameLockOwner(
+  left: { readonly pid: number; readonly token: string } | undefined,
+  right: { readonly pid: number; readonly token: string } | undefined,
+): boolean {
+  return left?.pid === right?.pid && left?.token === right?.token;
 }
 
 async function readLockOwner(lockPath: string): Promise<{ pid: number; token: string } | undefined> {
   let contents: string;
   try {
+    const stats = await lstat(lockPath);
+    if (stats.isSymbolicLink()) return undefined;
     contents = await readFile(lockPath, "utf8");
   } catch (error) {
     if (isErrno(error, "ENOENT")) return undefined;
@@ -643,6 +743,16 @@ function digestBytes(bytes: Uint8Array): FileDigest {
 async function isPresent(filePath: string): Promise<boolean> {
   try {
     await readFile(filePath);
+    return true;
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return false;
+    throw error;
+  }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await lstat(filePath);
     return true;
   } catch (error) {
     if (isErrno(error, "ENOENT")) return false;
