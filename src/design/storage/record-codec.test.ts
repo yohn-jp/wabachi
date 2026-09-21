@@ -3,6 +3,11 @@ import test from "node:test";
 
 import { createArchitectureDocument } from "../../architecture/canon/document.js";
 import { architectureCanonDigest, createDesignChangeSet } from "../change/diff.js";
+import {
+  checkerResultDigest,
+  implementationLinkageDigest,
+  implementationSubjectDigest,
+} from "../certification/certify.js";
 import { digestJson } from "../digest.js";
 import {
   decodeDesignIntentLifecycleRecord,
@@ -64,4 +69,76 @@ test("record decoder keeps semantic and revision digests structurally distinct",
   const decoded = decodeDesignIntentLifecycleRecord(value);
   assert.equal(decoded.changeDigest, digestJson({ proposal: true }));
   assert.equal("byteDigest" in decoded, false);
+});
+
+test("CertificationRecord freshness bindings round-trip without losing authority", () => {
+  const checks = [{ checkId: "machine", result: "match" as const }];
+  const implementationSubject = [{ path: "src/design/application.ts", mode: "100644", objectId: "b".repeat(40) }];
+  const certification = {
+    certificationId: "certification:change-206:revision",
+    changeId: "change-206",
+    changeDigest: CHANGE_DIGEST as never,
+    implementationRevision: { repository: "github.com/yohn-jp/wabachi", revision: REVISION },
+    result: "match" as const,
+    checks,
+    recordedAt: "2026-09-21T00:00:00.000Z",
+    proposalDigest: CHANGE_DIGEST,
+    targetCanonDigest: "b".repeat(64),
+    linkageDigest: implementationLinkageDigest([]),
+    implementationSubjectDigest: implementationSubjectDigest(implementationSubject),
+    checkerDigest: checkerResultDigest(checks),
+    implementationSubject,
+  };
+  const value = { ...lifecycle(), state: "certification-review" as const, certification };
+  const encoded = serializeDesignIntentLifecycleRecord(value);
+  const decoded = parseDesignIntentLifecycleRecord(encoded);
+  assert.deepEqual(decoded.certification, certification);
+  assert.equal((decoded.certification as typeof certification).proposalDigest, CHANGE_DIGEST);
+  assert.deepEqual((decoded.certification as typeof certification).implementationSubject, implementationSubject);
+});
+
+test("CertificationRecord binding fields are atomic and strictly validated", () => {
+  const checks = [{ checkId: "machine", result: "match" as const }];
+  const subject = { path: "src/design/application.ts", mode: "100644", objectId: "b".repeat(40) };
+  const certification = {
+    certificationId: "certification:change-206:revision",
+    changeId: "change-206",
+    changeDigest: CHANGE_DIGEST as never,
+    implementationRevision: { repository: "github.com/yohn-jp/wabachi", revision: REVISION },
+    result: "match" as const,
+    checks,
+    recordedAt: "2026-09-21T00:00:00.000Z",
+    proposalDigest: CHANGE_DIGEST,
+    targetCanonDigest: "b".repeat(64),
+    linkageDigest: implementationLinkageDigest([]),
+    implementationSubjectDigest: implementationSubjectDigest([subject]),
+    checkerDigest: checkerResultDigest(checks),
+    implementationSubject: [subject],
+  };
+  const value = { ...lifecycle(), state: "certification-review" as const, certification };
+  assert.throws(
+    () =>
+      decodeDesignIntentLifecycleRecord({ ...value, certification: { ...certification, checkerDigest: undefined } }),
+    /missing required field: checkerDigest/u,
+  );
+  assert.throws(
+    () => decodeDesignIntentLifecycleRecord({ ...value, certification: { ...certification, proposalDigest: "bad" } }),
+    /SHA-256 hexadecimal digest/u,
+  );
+  assert.throws(
+    () =>
+      decodeDesignIntentLifecycleRecord({
+        ...value,
+        certification: { ...certification, implementationSubject: [{ ...subject, extra: true }] },
+      }),
+    /unknown field: extra/u,
+  );
+  assert.throws(
+    () =>
+      decodeDesignIntentLifecycleRecord({
+        ...value,
+        certification: { ...certification, checkerDigest: "c".repeat(64) },
+      }),
+    /checkerDigest does not match checks/u,
+  );
 });

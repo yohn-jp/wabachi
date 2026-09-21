@@ -8,6 +8,12 @@ import type {
   ImplementationLink,
   RepositoryRevisionReference,
 } from "../contracts.js";
+import {
+  checkerResultDigest,
+  implementationLinkageDigest,
+  implementationSubjectDigest,
+  type GitImplementationSubject,
+} from "../certification/certify.js";
 import { canonicalizeJson, type Digest } from "../digest.js";
 import { createSemanticEntryKey, SEMANTIC_ENTRY_COLLECTIONS, type SemanticEntryKey } from "../entry-key.js";
 import { decodeImplementationLink, decodeImplementationLinks } from "../linkage/codec.js";
@@ -171,7 +177,41 @@ function certificationCheck(value: unknown, index: number): CertificationCheck {
   });
 }
 
-function certification(value: unknown): CertificationEvidence {
+const CERTIFICATION_BINDING_FIELDS = [
+  "proposalDigest",
+  "targetCanonDigest",
+  "linkageDigest",
+  "implementationSubjectDigest",
+  "checkerDigest",
+  "implementationSubject",
+] as const;
+
+function implementationSubject(value: unknown, label: string): readonly GitImplementationSubject[] {
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
+  const subjects = value.map((entry, index) => {
+    const item = record(entry, `${label}[${index}]`);
+    fields(item, ["path", "mode", "objectId"], `${label}[${index}]`);
+    return Object.freeze({
+      path: text(required(item, "path", `${label}[${index}]`), `${label}[${index}].path`, true),
+      mode: text(required(item, "mode", `${label}[${index}]`), `${label}[${index}].mode`),
+      objectId: text(required(item, "objectId", `${label}[${index}]`), `${label}[${index}].objectId`),
+    });
+  });
+  subjects.sort(
+    (left, right) =>
+      compareOrdinal(left.path, right.path) ||
+      compareOrdinal(left.mode, right.mode) ||
+      compareOrdinal(left.objectId, right.objectId),
+  );
+  return Object.freeze(subjects);
+}
+
+function certification(
+  value: unknown,
+  changeId: string,
+  changeDigest: Digest,
+  implementations: readonly ImplementationLink[],
+): CertificationEvidence {
   const item = record(value, "certification evidence");
   fields(
     item,
@@ -184,6 +224,7 @@ function certification(value: unknown): CertificationEvidence {
       "checks",
       "recordedAt",
       "references",
+      ...CERTIFICATION_BINDING_FIELDS,
     ],
     "certification evidence",
   );
@@ -200,15 +241,68 @@ function certification(value: unknown): CertificationEvidence {
       throw new TypeError(`certification evidence contains duplicate check: ${checks[index].checkId}`);
     }
   }
+  const hasBindings = CERTIFICATION_BINDING_FIELDS.some((field) => Object.hasOwn(item, field));
+  if (!hasBindings) {
+    return Object.freeze({
+      certificationId: identifier(required(item, "certificationId", "certification evidence"), "certificationId"),
+      changeId: identifier(required(item, "changeId", "certification evidence"), "certification changeId"),
+      changeDigest: digest(required(item, "changeDigest", "certification evidence"), "certification changeDigest"),
+      implementationRevision: revision(required(item, "implementationRevision", "certification evidence")),
+      result,
+      checks: Object.freeze(checks),
+      recordedAt: text(required(item, "recordedAt", "certification evidence"), "certification recordedAt", true),
+      ...(item.references === undefined ? {} : { references: references(item.references, "certification references") }),
+    });
+  }
+  for (const field of CERTIFICATION_BINDING_FIELDS) required(item, field, "certification evidence");
+  const certificationId = identifier(required(item, "certificationId", "certification evidence"), "certificationId");
+  const certificationChangeId = identifier(
+    required(item, "changeId", "certification evidence"),
+    "certification changeId",
+  );
+  const certificationChangeDigest = digest(
+    required(item, "changeDigest", "certification evidence"),
+    "certification changeDigest",
+  );
+  const subjects = implementationSubject(item.implementationSubject, "certification implementationSubject");
+  const proposalDigest = digest(item.proposalDigest, "certification proposalDigest");
+  const targetCanonDigest = digest(item.targetCanonDigest, "certification targetCanonDigest");
+  const linkageDigest = digest(item.linkageDigest, "certification linkageDigest");
+  const implementationSubjectDigestValue = digest(
+    item.implementationSubjectDigest,
+    "certification implementationSubjectDigest",
+  );
+  const checkerDigest = digest(item.checkerDigest, "certification checkerDigest");
+  if (certificationChangeId !== changeId || certificationChangeDigest !== changeDigest) {
+    throw new TypeError("certification evidence is stale or belongs to another Design Change");
+  }
+  if (proposalDigest !== certificationChangeDigest) {
+    throw new TypeError("certification proposalDigest does not match changeDigest");
+  }
+  if (linkageDigest !== implementationLinkageDigest(implementations)) {
+    throw new TypeError("certification linkageDigest does not match implementation links");
+  }
+  if (implementationSubjectDigestValue !== implementationSubjectDigest(subjects)) {
+    throw new TypeError("certification implementationSubjectDigest does not match implementationSubject");
+  }
+  if (checkerDigest !== checkerResultDigest(checks)) {
+    throw new TypeError("certification checkerDigest does not match checks");
+  }
   return Object.freeze({
-    certificationId: identifier(required(item, "certificationId", "certification evidence"), "certificationId"),
-    changeId: identifier(required(item, "changeId", "certification evidence"), "certification changeId"),
-    changeDigest: digest(required(item, "changeDigest", "certification evidence"), "certification changeDigest"),
+    certificationId,
+    changeId: certificationChangeId,
+    changeDigest: certificationChangeDigest,
     implementationRevision: revision(required(item, "implementationRevision", "certification evidence")),
     result,
     checks: Object.freeze(checks),
     recordedAt: text(required(item, "recordedAt", "certification evidence"), "certification recordedAt", true),
     ...(item.references === undefined ? {} : { references: references(item.references, "certification references") }),
+    proposalDigest,
+    targetCanonDigest,
+    linkageDigest,
+    implementationSubjectDigest: implementationSubjectDigestValue,
+    checkerDigest,
+    implementationSubject: subjects,
   });
 }
 
@@ -223,6 +317,11 @@ function lifecycle(value: unknown): DesignIntentLifecycleRecord {
   if (!STATES.includes(state as DesignChangeLifecycleState))
     throw new TypeError("Design lifecycle state is unsupported");
   const lifecycleState = state as DesignChangeLifecycleState;
+  const changeId = identifier(required(item, "changeId", "Design lifecycle record"), "Design lifecycle changeId");
+  const changeDigest = digest(
+    required(item, "changeDigest", "Design lifecycle record"),
+    "Design lifecycle changeDigest",
+  );
   const implementationsValue = required(item, "implementations", "Design lifecycle record");
   if (!Array.isArray(implementationsValue)) throw new TypeError("Design lifecycle implementations must be an array");
   const implementations = implementationsValue
@@ -234,10 +333,13 @@ function lifecycle(value: unknown): DesignIntentLifecycleRecord {
     }
   }
   const review = item.review === undefined ? undefined : validateDesignReviewEvidence(item.review);
-  const certificationValue = item.certification === undefined ? undefined : certification(item.certification);
+  const certificationValue =
+    item.certification === undefined
+      ? undefined
+      : certification(item.certification, changeId, changeDigest, implementations);
   return Object.freeze({
-    changeId: identifier(required(item, "changeId", "Design lifecycle record"), "Design lifecycle changeId"),
-    changeDigest: digest(required(item, "changeDigest", "Design lifecycle record"), "Design lifecycle changeDigest"),
+    changeId,
+    changeDigest,
     state: lifecycleState,
     ...(review === undefined ? {} : { review }),
     implementations: Object.freeze(implementations),
