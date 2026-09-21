@@ -37,6 +37,8 @@ export type DesignChangeEventInput = Omit<DesignChangeEvent, "eventDigest"> & {
 export interface MachineTransitionContext {
   readonly changeId: string;
   readonly proposalDigest: Digest;
+  /** Immutable Git revision resolved for the current proposal, when available. */
+  readonly proposalRevision?: string;
   readonly review?: DesignReviewEvidence;
   readonly implementations: readonly ImplementationLink[];
   readonly certification?: CertificationEvidence;
@@ -85,6 +87,8 @@ export interface LifecycleEvidenceSnapshot {
 export interface LifecycleReplayOptions {
   readonly changeId: string;
   readonly initialProposalDigest: Digest;
+  /** The immutable Git revision resolved for the initial proposal. */
+  readonly initialProposalRevision?: string;
   readonly events: readonly DesignChangeEvent[];
   readonly machine: MachinePort;
   readonly evidence?: LifecycleEvidencePort | LifecycleEvidenceSnapshot;
@@ -200,11 +204,18 @@ function sameJson(left: unknown, right: unknown): boolean {
 function checkEvidenceIdentity(
   changeId: string,
   proposalDigest: Digest,
+  proposalRevision: string | undefined,
   review: DesignReviewEvidence | undefined,
   implementations: readonly ImplementationLink[],
   certification: CertificationEvidence | undefined,
 ): void {
-  if (review !== undefined && (review.changeId !== changeId || review.proposalDigest !== proposalDigest)) {
+  if (
+    review !== undefined &&
+    (review.changeId !== changeId ||
+      review.proposalDigest !== proposalDigest ||
+      proposalRevision === undefined ||
+      review.proposalRevision !== proposalRevision)
+  ) {
     invalid("review evidence is stale or belongs to another Change Set");
   }
   for (const implementation of implementations) {
@@ -262,6 +273,14 @@ function eventType(event: DesignChangeEvent, payload: Record<string, unknown>): 
 }
 
 function assertEventDigest(event: DesignChangeEvent): void {
+  assertNonEmptyString(event.changeId, `event ${event.sequence} changeId`);
+  if (!Number.isSafeInteger(event.sequence) || event.sequence < LIFECYCLE_EVENT_SEQUENCE_START) {
+    invalid(`event sequence must be a non-negative safe integer`);
+  }
+  assertDigest(event.previousEventDigest, `event ${event.sequence} previousEventDigest`);
+  assertNonEmptyString(event.recordedAt, `event ${event.sequence} recordedAt`);
+  assertNonEmptyString(event.kind ?? event.type ?? event.event, `event ${event.sequence} kind`);
+  assertDigest(event.eventDigest, `event ${event.sequence} eventDigest`);
   const recreated = digestJson(eventDigestInput(event));
   if (event.eventDigest !== recreated) invalid(`event ${event.sequence} digest does not match its content`);
 }
@@ -291,6 +310,7 @@ export function replayLifecycle(options: LifecycleReplayOptions): LifecycleProje
   let expectedSequence = LIFECYCLE_EVENT_SEQUENCE_START;
   let previousDigest = options.initialProposalDigest;
   let proposalDigest = options.initialProposalDigest;
+  let proposalRevision = options.initialProposalRevision;
   let state: DesignChangeLifecycleState = "draft";
   let review: DesignReviewEvidence | undefined;
   let implementations: ImplementationLink[] = [];
@@ -315,7 +335,10 @@ export function replayLifecycle(options: LifecycleReplayOptions): LifecycleProje
     if (type === "AMEND") {
       const amendedDigest = payload.proposalDigest ?? payload.changeDigest;
       assertDigest(amendedDigest, `event ${event.sequence} proposalDigest`);
+      const amendedRevision = payload.proposalRevision;
+      assertNonEmptyString(amendedRevision, `event ${event.sequence} proposalRevision`);
       proposalDigest = amendedDigest;
+      proposalRevision = amendedRevision;
       // History remains available below, but no evidence from the old
       // proposal can satisfy guards for the amended proposal.
       review = undefined;
@@ -374,10 +397,11 @@ export function replayLifecycle(options: LifecycleReplayOptions): LifecycleProje
       certifications.push(certificationValue);
     }
 
-    checkEvidenceIdentity(options.changeId, proposalDigest, review, implementations, certification);
+    checkEvidenceIdentity(options.changeId, proposalDigest, proposalRevision, review, implementations, certification);
     state = transition(options.machine, state, event, {
       changeId: options.changeId,
       proposalDigest,
+      ...(proposalRevision === undefined ? {} : { proposalRevision }),
       ...(review === undefined ? {} : { review }),
       implementations,
       ...(certification === undefined ? {} : { certification }),

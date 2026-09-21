@@ -14,12 +14,14 @@ import {
 
 const proposalDigest = digestJson({ proposal: "v1" });
 const amendedDigest = digestJson({ proposal: "v2" });
+const proposalRevision = "a".repeat(40);
+const amendedRevision = "b".repeat(40);
 
 const review = {
   reviewId: "review-1",
   changeId: "change-1",
   proposalDigest,
-  proposalRevision: "abc123",
+  proposalRevision,
   decision: "approved" as const,
   actor: "architect",
   reason: "valid",
@@ -115,6 +117,7 @@ test("replays a chained stream into authoritative lifecycle state", () => {
   const projection = replayLifecycle({
     changeId: "change-1",
     initialProposalDigest: proposalDigest,
+    initialProposalRevision: proposalRevision,
     events,
     machine: machineForTests(),
     evidence,
@@ -135,6 +138,7 @@ test("rejects deletion, reordering, broken digests, and stale cached state", () 
   const options = {
     changeId: "change-1",
     initialProposalDigest: proposalDigest,
+    initialProposalRevision: proposalRevision,
     machine: machineForTests(),
     evidence,
   };
@@ -163,12 +167,17 @@ test("AMEND retains historical evidence but invalidates current guards", () => {
   let events: readonly DesignChangeEvent[] = [];
   events = event(events, "REVIEW", { type: "REVIEW", reviewId: "review-1" });
   events = event(events, "TRANSITION", { type: "APPROVE" });
-  events = event(events, "AMEND", { type: "AMEND", proposalDigest: amendedDigest });
+  events = event(events, "AMEND", {
+    type: "AMEND",
+    proposalDigest: amendedDigest,
+    proposalRevision: amendedRevision,
+  });
   const evidence: LifecycleEvidenceSnapshot = { reviews: { "review-1": review } };
 
   const projection = replayLifecycle({
     changeId: "change-1",
     initialProposalDigest: proposalDigest,
+    initialProposalRevision: proposalRevision,
     events,
     machine: machineForTests(),
     evidence,
@@ -185,6 +194,7 @@ test("AMEND retains historical evidence but invalidates current guards", () => {
       replayLifecycle({
         changeId: "change-1",
         initialProposalDigest: proposalDigest,
+        initialProposalRevision: proposalRevision,
         events: staleEvents,
         machine: machineForTests(),
         evidence,
@@ -206,5 +216,20 @@ test("event creation refuses a hand-edited digest", () => {
         eventDigest: "0".repeat(64) as Digest,
       }),
     /digest/,
+  );
+});
+
+test("does not admit review evidence without an independently resolved proposal revision", () => {
+  const events = event([], "REVIEW", { type: "REVIEW", reviewId: "review-1" });
+  assert.throws(
+    () =>
+      replayLifecycle({
+        changeId: "change-1",
+        initialProposalDigest: proposalDigest,
+        events,
+        machine: machineForTests(),
+        evidence: { reviews: { "review-1": review } },
+      }),
+    /stale or belongs to another Change Set/,
   );
 });
