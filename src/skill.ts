@@ -115,6 +115,25 @@ export const SKILL_SCENARIOS: readonly SkillScenario[] = [
     canonicalCommandId: "architecture.render",
   }),
   skillScenario({
+    id: "design-intent-lifecycle",
+    title: "Run a Design Intent lifecycle",
+    whenToUse:
+      "Use for the production Design Change authoring, review, linkage, certification, and promotion workflow.",
+    workflow: [
+      ["Author and inspect a Design Change from the current Canon.", "design.create"],
+      ["Submit and record immutable design review evidence.", "design.review"],
+      ["Start implementation and record governed linkage.", "design.link"],
+      ["Derive certification from repository evidence and promote the result.", "design.certify"],
+      ["Render the current and proposed Canons for inspection.", "design.render"],
+    ],
+    invariants: [
+      "The Architecture Canon remains the semantic authority.",
+      "Lifecycle transitions are decided by the XState machine and stale or pending storage fails closed.",
+      "Certification results are produced by the production evidence pipeline, never supplied as final success.",
+    ],
+    canonicalCommandId: "design.create",
+  }),
+  skillScenario({
     id: "architecture-documentation",
     title: "Follow the Architecture Documentation workflow",
     whenToUse:

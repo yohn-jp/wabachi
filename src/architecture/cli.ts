@@ -6,6 +6,8 @@ import { projectArchitectureDocument } from "./documentation/project.js";
 import { ArchitectureSiteError, buildArchitectureSite } from "./documentation/site.js";
 import { projectArchitectureDocumentToReactFlow } from "./projection/react-flow.js";
 import { commandUsage, DEFAULT_ARCHITECTURE_CANON_PATH } from "../command-contract.js";
+import { assertNoPendingTransactions } from "../design/storage/transaction.js";
+import { resolveRepositoryRoot } from "../design/storage/paths.js";
 
 const MAX_DIAGNOSTIC_LENGTH = 240;
 
@@ -63,6 +65,19 @@ function architectureCanonSummary(counts: ArchitectureCanonCounts): string {
 
 function isMissingFileError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+async function guardManagedCanonRead(file: string): Promise<void> {
+  let repositoryRoot: string;
+  try {
+    repositoryRoot = await resolveRepositoryRoot();
+  } catch {
+    return;
+  }
+  const managedPath = path.resolve(repositoryRoot, DEFAULT_ARCHITECTURE_CANON_PATH);
+  if (file === DEFAULT_ARCHITECTURE_CANON_PATH || path.resolve(file) === managedPath) {
+    await assertNoPendingTransactions(repositoryRoot);
+  }
 }
 
 function parseArguments(
@@ -156,6 +171,7 @@ export async function runArchitectureCli(args: readonly string[]): Promise<numbe
   const file = parsed.value.file ?? DEFAULT_ARCHITECTURE_CANON_PATH;
   let document;
   try {
+    await guardManagedCanonRead(file);
     document = parseCanonicalArchitectureDocument(await readFile(file, "utf8"));
   } catch (error) {
     if (isMissingFileError(error)) {

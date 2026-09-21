@@ -54,7 +54,7 @@ test("skill index, scenario, and unknown scenario are bounded and deterministic"
   console.error = (line: string) => errors.push(line);
   try {
     assert.equal(await runCli(["skill", "--json"]), 0);
-    assert.equal(JSON.parse(logs[0] ?? "{}").scenarios.length, 5);
+    assert.equal(JSON.parse(logs[0] ?? "{}").scenarios.length, 6);
     logs.length = 0;
     assert.equal(await runCli(["skill", "architecture-documentation", "--json"]), 0);
     assert.equal(JSON.parse(logs[0] ?? "{}").id, "architecture-documentation");
