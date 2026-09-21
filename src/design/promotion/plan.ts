@@ -355,13 +355,7 @@ function validateLifecycle(
   }
   if (
     certification.result !== "match" ||
-    !isUsableCertification(
-      certification,
-      input.requiredCheckIds,
-      proposalTargets,
-      target,
-      lifecycle.implementations,
-    )
+    !isUsableCertification(certification, input.requiredCheckIds, proposalTargets, target, lifecycle.implementations)
   ) {
     return { code: "stale-certification", detail: "certification is not a complete match for the current proposal" };
   }
