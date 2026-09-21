@@ -14,7 +14,7 @@
   "evidence": [
     {
       "provider": "replace-with-provider",
-      "reference": "replace-with-immutable-completion-reference"
+      "reference": "documentation-only-test-fixture; replace-with-immutable-completion-reference"
     }
   ]
 }
