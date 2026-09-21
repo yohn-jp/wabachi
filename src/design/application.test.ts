@@ -157,6 +157,12 @@ function fixture() {
         return change;
       },
     },
+    reviewTransaction: {
+      async commit(evidence, nextLifecycle) {
+        await ports.reviews.record(evidence);
+        await ports.lifecycle.write(nextLifecycle);
+      },
+    },
   });
   return {
     ports,

@@ -30,7 +30,12 @@ import {
   recordDesignReviewEvidence,
   serializeDesignReviewHistory,
 } from "./review/codec.js";
-import { DesignReviewService, type DesignAmendmentTransaction, type ProposalRevisionReader } from "./review/service.js";
+import {
+  DesignReviewService,
+  type DesignAmendmentTransaction,
+  type DesignReviewTransaction,
+  type ProposalRevisionReader,
+} from "./review/service.js";
 import { DesignStore } from "./storage/store.js";
 import { assertNoPendingTransactions, recoverTransaction, type FileDigest } from "./storage/transaction.js";
 import { createDesignRepositoryPaths, resolveRepositoryRoot } from "./storage/paths.js";
@@ -365,6 +370,17 @@ export async function createDesignRuntime(options: DesignRuntimeOptions = {}): P
       ]);
     },
   };
+  const reviewTransaction: DesignReviewTransaction = {
+    async commit(evidence, lifecycle) {
+      const paths = createDesignRepositoryPaths(repositoryRoot, evidence.changeId);
+      const current = await storedJson(repositoryRoot, paths.reviews, parseDesignReviewHistory);
+      const history = recordDesignReviewEvidence(current?.value ?? createDesignReviewHistory(), evidence);
+      await store.commit([
+        planJson(paths.relative.reviews, current, serializeDesignReviewHistory(history)),
+        await store.planLifecycleWrite(lifecycle),
+      ]);
+    },
+  };
   const proposalRevisions: ProposalRevisionReader = {
     async read(changeId, revision) {
       const relative = createDesignRepositoryPaths(repositoryRoot, changeId).relative.change;
@@ -375,7 +391,7 @@ export async function createDesignRuntime(options: DesignRuntimeOptions = {}): P
       }
     },
   };
-  const review = new DesignReviewService(ports, { proposalRevisions, amendmentTransaction });
+  const review = new DesignReviewService(ports, { proposalRevisions, amendmentTransaction, reviewTransaction });
   const promotion = new DesignPromotionService(makePromotionStore(repositoryRoot, store));
   const application = createDesignApplication(ports, {
     review,

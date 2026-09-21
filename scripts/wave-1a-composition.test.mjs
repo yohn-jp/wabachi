@@ -205,6 +205,12 @@ test("Wave 1A production composition connects diff/apply, lifecycle replay/amend
         lifecycleEvents.push(event);
       },
     },
+    reviewTransaction: {
+      async commit(evidence, nextLifecycle) {
+        reviews.push(evidence);
+        lifecycle = nextLifecycle;
+      },
+    },
   });
 
   const transaction = {
