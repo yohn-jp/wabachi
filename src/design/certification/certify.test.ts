@@ -9,12 +9,14 @@ import {
   checkCertificationFreshness,
   type CertificationAggregationInput,
   type CertificationProofPlanLike,
+  type GitImplementationSubject,
 } from "./certify.js";
 
 const digest = "a".repeat(64) as Digest;
 const target = '["element","target"]' as SemanticEntryKey;
 const implementation = { repositoryHost: "github.com", repositoryId: "repo-1", number: 17 } as const;
 const revision = { repository: "github.com/acme/project", revision: "commit-1" } as const;
+const subject: GitImplementationSubject = { path: "src/feature.ts", mode: "100644", objectId: "object-1" };
 
 function plan(
   obligations = [
@@ -46,6 +48,7 @@ function input(overrides: Partial<CertificationAggregationInput> = {}): Certific
   return {
     plan: plan(),
     implementationLinks: [link()],
+    implementationSubject: [subject],
     machineChecks: [{ checkId: "canon", result: "match" }],
     humanReviews: [
       {
@@ -143,4 +146,27 @@ test("freshness never replaces the originally tested implementation revision", (
   });
   assert.equal(freshness.stale, true);
   assert.equal(evidence.implementationRevision.revision, "commit-1");
+});
+
+test("implementation subject digest is the Git tree subject, never the Issue linkage", () => {
+  const baseline = aggregateCertification(input()).evidence;
+  const changedIssue = aggregateCertification(
+    input({
+      implementationLinks: [
+        {
+          ...link(),
+          implementation: { ...implementation, number: 99 },
+        },
+      ],
+      implementationSubject: [subject],
+    }),
+  ).evidence;
+  assert.equal(changedIssue.implementationSubjectDigest, baseline.implementationSubjectDigest);
+  assert.notEqual(changedIssue.linkageDigest, baseline.linkageDigest);
+});
+
+test("missing Git implementation subject cannot produce a successful certification", () => {
+  const result = aggregateCertification(input({ implementationSubject: undefined }));
+  assert.equal(result.result, "unresolved");
+  assert.ok(result.checks.some((entry) => entry.checkId === "implementation-subject-binding"));
 });

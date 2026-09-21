@@ -3,7 +3,6 @@ import type {
   CertificationEvidence,
   CertificationFinding,
   DesignChangeSet,
-  ExternalIssueReference,
   ImplementationLink,
   RepositoryRevisionReference,
 } from "../contracts.js";
@@ -62,9 +61,21 @@ export interface CertificationBindingDigests {
   readonly checkerDigest: Digest;
 }
 
+/** One entry in the Git implementation subject set.
+ *
+ * Issue references identify work items; they are deliberately not a
+ * substitute for this Git subject. The subject is the exact repository tree
+ * material that was certified.
+ */
+export interface GitImplementationSubject {
+  readonly path: string;
+  readonly mode: string;
+  readonly objectId: string;
+}
+
 /** Persistable certification record with all freshness bindings made explicit. */
 export interface CertificationRecord extends CertificationEvidence, CertificationBindingDigests {
-  readonly implementationSubject: readonly ExternalIssueReference[];
+  readonly implementationSubject: readonly GitImplementationSubject[];
 }
 
 export interface CertificationAggregationInput {
@@ -75,7 +86,7 @@ export interface CertificationAggregationInput {
   readonly implementationLinks?: readonly ImplementationLink[];
   /** Alias accepted by storage adapters that call links the linkage set. */
   readonly links?: readonly ImplementationLink[];
-  readonly implementationSubject?: ExternalIssueReference | readonly ExternalIssueReference[];
+  readonly implementationSubject?: GitImplementationSubject | readonly GitImplementationSubject[];
   readonly machineChecks?: readonly CertificationCheck[] | { readonly checks?: readonly CertificationCheck[] };
   readonly machine?: readonly CertificationCheck[] | { readonly checks?: readonly CertificationCheck[] };
   readonly humanReviews?: readonly HumanCertificationReview[];
@@ -103,7 +114,7 @@ export interface CertificationFreshnessInput {
   readonly currentTargetCanonDigest?: Digest;
   readonly currentImplementationRevision?: RepositoryRevisionReference;
   readonly currentLinks?: readonly ImplementationLink[];
-  readonly currentImplementationSubject?: ExternalIssueReference | readonly ExternalIssueReference[];
+  readonly currentImplementationSubject?: GitImplementationSubject | readonly GitImplementationSubject[];
   readonly currentChecks?: readonly CertificationCheck[];
   /** A repository adapter may provide an exact list of changed paths. */
   readonly changedPaths?: readonly (string | { readonly path: string; readonly kind?: string })[];
@@ -143,34 +154,35 @@ function sortChecks(checks: readonly CertificationCheck[]): CertificationCheck[]
 }
 
 function sortLinks(links: readonly ImplementationLink[]): readonly ImplementationLink[] {
-  return [...links].sort((left, right) => compareOrdinal(left.linkId, right.linkId));
+  return [...links].sort((left, right) => {
+    const byDigest = compareOrdinal(digestJson(left), digestJson(right));
+    return byDigest !== 0 ? byDigest : compareOrdinal(left.linkId, right.linkId);
+  });
 }
 
-function implementationKey(value: ExternalIssueReference): string {
-  return JSON.stringify([value.repositoryHost, value.repositoryId, value.number]);
+function implementationSubjectKey(value: GitImplementationSubject): string {
+  return JSON.stringify([value.path, value.mode, value.objectId]);
 }
 
 function sortedSubjects(
-  links: readonly ImplementationLink[],
-  supplied: ExternalIssueReference | readonly ExternalIssueReference[] | undefined,
-): readonly ExternalIssueReference[] {
-  const values =
-    supplied === undefined ? links.map((link) => link.implementation) : Array.isArray(supplied) ? supplied : [supplied];
-  const byKey = new Map<string, ExternalIssueReference>();
-  for (const subject of values) byKey.set(implementationKey(subject), subject);
-  return [...byKey.values()].sort((left, right) => compareOrdinal(implementationKey(left), implementationKey(right)));
+  supplied: GitImplementationSubject | readonly GitImplementationSubject[] | undefined,
+): readonly GitImplementationSubject[] {
+  const values = supplied === undefined ? [] : Array.isArray(supplied) ? supplied : [supplied];
+  return [...values].sort((left, right) =>
+    compareOrdinal(implementationSubjectKey(left), implementationSubjectKey(right)),
+  );
 }
 
-function checksDigest(checks: readonly CertificationCheck[]): Digest {
-  return digestJson(sortChecks(checks)) as Digest;
-}
-
-function linksDigest(links: readonly ImplementationLink[]): Digest {
+export function implementationLinkageDigest(links: readonly ImplementationLink[]): Digest {
   return digestJson(sortLinks(links)) as Digest;
 }
 
-function subjectsDigest(subjects: readonly ExternalIssueReference[]): Digest {
+export function implementationSubjectDigest(subjects: readonly GitImplementationSubject[]): Digest {
   return digestJson(subjects) as Digest;
+}
+
+export function checkerResultDigest(checks: readonly CertificationCheck[]): Digest {
+  return digestJson(sortChecks(checks)) as Digest;
 }
 
 function targetCanonDigest(input: CertificationAggregationInput): Digest {
@@ -271,7 +283,7 @@ export function aggregateCertification(input: CertificationAggregationInput): Ce
   const plan = input.plan;
   const links = input.implementationLinks ?? input.links ?? [];
   const sortedLinks = sortLinks(links);
-  const subjects = sortedSubjects(sortedLinks, input.implementationSubject);
+  const subjects = sortedSubjects(input.implementationSubject);
   const machine = readChecks(input.machineChecks ?? input.machine);
   const reviews = [
     ...(input.humanReviews ?? input.reviews ?? []),
@@ -379,6 +391,21 @@ export function aggregateCertification(input: CertificationAggregationInput): Ce
   if (input.targetCanon !== undefined && digestJson(input.targetCanon) !== targetCanonDigest(input)) {
     checks.push(check("target-canon-binding", "mismatch", "target Canon bytes do not match the bound digest"));
   }
+  if (input.implementationSubject === undefined) {
+    checks.push(check("implementation-subject-binding", "unresolved", "Git implementation subject is missing"));
+  } else if (
+    subjects.some(
+      (subject) =>
+        typeof subject.path !== "string" ||
+        subject.path.length === 0 ||
+        typeof subject.mode !== "string" ||
+        subject.mode.length === 0 ||
+        typeof subject.objectId !== "string" ||
+        subject.objectId.length === 0,
+    )
+  ) {
+    checks.push(check("implementation-subject-binding", "unresolved", "Git implementation subject is malformed"));
+  }
 
   const orderedChecks = Object.freeze(sortChecks(checks));
   const result = resultOf(orderedChecks);
@@ -386,9 +413,9 @@ export function aggregateCertification(input: CertificationAggregationInput): Ce
   const digests: CertificationBindingDigests = Object.freeze({
     proposalDigest: plan.changeDigest,
     targetCanonDigest: targetDigest,
-    linkageDigest: linksDigest(sortedLinks),
-    implementationSubjectDigest: subjectsDigest(subjects),
-    checkerDigest: checksDigest(orderedChecks),
+    linkageDigest: implementationLinkageDigest(sortedLinks),
+    implementationSubjectDigest: implementationSubjectDigest(subjects),
+    checkerDigest: checkerResultDigest(orderedChecks),
   });
   const evidence: CertificationRecord = Object.freeze({
     certificationId: input.certificationId ?? `certification:${plan.changeId}:${plan.implementationRevision.revision}`,
@@ -414,16 +441,13 @@ function changedPathKind(value: string | { readonly path: string; readonly kind?
 }
 
 function currentDigestForLinks(links: readonly ImplementationLink[] | undefined): Digest | undefined {
-  return links === undefined ? undefined : linksDigest(sortLinks(links));
+  return links === undefined ? undefined : implementationLinkageDigest(links);
 }
 
 function currentDigestForSubjects(
-  links: readonly ImplementationLink[] | undefined,
-  subjects: ExternalIssueReference | readonly ExternalIssueReference[] | undefined,
+  subjects: GitImplementationSubject | readonly GitImplementationSubject[] | undefined,
 ): Digest | undefined {
-  return links === undefined && subjects === undefined
-    ? undefined
-    : subjectsDigest(sortedSubjects(links ?? [], subjects));
+  return subjects === undefined ? undefined : implementationSubjectDigest(sortedSubjects(subjects));
 }
 
 /**
@@ -476,7 +500,7 @@ export function checkCertificationFreshness(input: CertificationFreshnessInput):
       reasons.push("implementation-linkage-changed");
     }
   }
-  const currentSubjectDigest = currentDigestForSubjects(input.currentLinks, input.currentImplementationSubject);
+  const currentSubjectDigest = currentDigestForSubjects(input.currentImplementationSubject);
   if (currentSubjectDigest !== undefined) {
     if (certification.implementationSubjectDigest === undefined) {
       stale = true;
@@ -490,7 +514,7 @@ export function checkCertificationFreshness(input: CertificationFreshnessInput):
     if (certification.checkerDigest === undefined) {
       stale = true;
       reasons.push("checker-binding-missing");
-    } else if (checksDigest(input.currentChecks) !== certification.checkerDigest) {
+    } else if (checkerResultDigest(input.currentChecks) !== certification.checkerDigest) {
       stale = true;
       reasons.push("checker-output-changed");
     }
