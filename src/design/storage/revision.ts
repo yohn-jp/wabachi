@@ -96,6 +96,8 @@ interface GitTreeEntry {
   readonly path: string;
 }
 
+const CURRENT_CANON_RELATIVE_PATH = ".wabachi/architecture.json";
+
 function parseGitTree(stdout: string): GitTreeEntry[] {
   const entries: GitTreeEntry[] = [];
   for (const record of stdout.split("\0")) {
@@ -159,10 +161,10 @@ function resolveSubjectOptions(
 }
 
 /**
- * Computes a deterministic subject for one Git tree. The tree records mode,
- * object type, object ID, and repository-relative path. Only the active
- * lifecycle record may be omitted; all source, test, lockfile, and semantic
- * change artifacts remain part of the subject.
+ * Computes a deterministic subject for one Git tree. The subject records
+ * mode, object ID, and repository-relative path. The current Canon and only
+ * the active lifecycle record may be omitted; source, tests, lockfiles, and
+ * semantic change artifacts remain part of the subject.
  */
 export async function computeGitSubjectDigest(
   input: GitSubjectDigestOptions | string,
@@ -171,19 +173,20 @@ export async function computeGitSubjectDigest(
 ): Promise<Digest> {
   const options = resolveSubjectOptions(input, second, third);
   const activeRecordPath = options.activeRecordPath ?? options.excludedPath;
-  const excluded =
+  const activeRecord =
     activeRecordPath === undefined
       ? options.changeId === undefined
         ? undefined
         : createDesignRepositoryPaths(options.repositoryRoot, options.changeId).relative.lifecycle
       : pathRelativeToRoot(options.repositoryRoot, activeRecordPath);
+  const excluded = new Set([CURRENT_CANON_RELATIVE_PATH, ...(activeRecord === undefined ? [] : [activeRecord])]);
   const output = await runGit(
     ["ls-tree", "-r", "-z", "--full-tree", options.revision ?? "HEAD"],
     options.repositoryRoot,
   );
-  const entries = parseGitTree(output).filter((entry) => entry.path !== excluded);
+  const entries = parseGitTree(output).filter((entry) => !excluded.has(entry.path));
   return digestJson(
-    entries.map(({ mode, type, objectId, path: entryPath }) => ({ mode, type, objectId, path: entryPath })),
+    entries.map(({ mode, objectId, path: entryPath }) => ({ mode, objectId, path: entryPath })),
   );
 }
 

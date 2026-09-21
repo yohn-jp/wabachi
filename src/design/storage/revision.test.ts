@@ -31,6 +31,7 @@ async function createRepository(): Promise<{ readonly root: string; readonly rev
   await mkdir(path.join(root, "src"), { recursive: true });
   await mkdir(path.join(root, "test"), { recursive: true });
   await mkdir(path.join(root, ".wabachi", "changes", "change-205"), { recursive: true });
+  await writeFile(path.join(root, ".wabachi", "architecture.json"), '{"documentId":"current"}\n');
   await writeFile(path.join(root, "src", "main.ts"), "export const value = 1;\n");
   await writeFile(path.join(root, "test", "main.test.ts"), "test();\n");
   await writeFile(path.join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
@@ -103,6 +104,25 @@ test("excludes only the active lifecycle record from the subject", async () => {
     await computeGitSubjectDigest({
       repositoryRoot: root,
       revision: changeRevision,
+      activeRecordPath: ".wabachi/changes/change-205/lifecycle.json",
+    }),
+    initial,
+  );
+});
+
+test("current Canon updates do not stale the implementation subject", async () => {
+  const { root, revision } = await createRepository();
+  const initial = await computeGitSubjectDigest({
+    repositoryRoot: root,
+    revision,
+    activeRecordPath: ".wabachi/changes/change-205/lifecycle.json",
+  });
+  await writeFile(path.join(root, ".wabachi", "architecture.json"), '{"documentId":"promoted"}\n');
+  const promotedRevision = await commit(root, "promote current Canon");
+  assert.equal(
+    await computeGitSubjectDigest({
+      repositoryRoot: root,
+      revision: promotedRevision,
       activeRecordPath: ".wabachi/changes/change-205/lifecycle.json",
     }),
     initial,
