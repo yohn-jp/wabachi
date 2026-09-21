@@ -4,8 +4,13 @@ import type {
   DesignIntentLifecycleRecord,
   DesignReviewEvidence,
   ImplementationLink,
+  MachineTransitionContext,
+  MachineTransitionEvent,
+  MachineTransitionRequest,
+  MachineTransitionResult,
 } from "../contracts.js";
 import type { Digest, JsonValue } from "../digest.js";
+import type { MachinePort } from "../ports.js";
 import { canonicalizeJson, digestJson } from "../digest.js";
 
 /** The first event in a stream is linked to the proposal that created the stream. */
@@ -18,59 +23,13 @@ export type LifecycleEventKind = "AMEND" | "REVIEW" | "IMPLEMENTATION" | "CERTIF
  * transport-neutral: repositories may store evidence inline or store a typed
  * reference which is resolved by an EvidencePort during replay.
  */
-export interface DesignChangeEvent {
-  readonly changeId: string;
-  readonly sequence: number;
-  readonly previousEventDigest: Digest;
-  readonly recordedAt: string;
+export interface DesignChangeEvent extends MachineTransitionEvent {
   readonly kind?: LifecycleEventKind | string;
-  readonly type?: string;
-  readonly event?: string;
-  readonly payload?: JsonValue;
-  readonly eventDigest: Digest;
 }
 
 export type DesignChangeEventInput = Omit<DesignChangeEvent, "eventDigest"> & {
   readonly eventDigest?: Digest;
 };
-
-export interface MachineTransitionContext {
-  readonly changeId: string;
-  readonly proposalDigest: Digest;
-  /** Immutable Git revision resolved for the current proposal, when available. */
-  readonly proposalRevision?: string;
-  readonly review?: DesignReviewEvidence;
-  readonly implementations: readonly ImplementationLink[];
-  readonly certification?: CertificationEvidence;
-}
-
-export interface MachineTransitionRequest {
-  readonly state: DesignChangeLifecycleState;
-  readonly event: DesignChangeEvent;
-  readonly context: MachineTransitionContext;
-}
-
-export interface MachineTransitionResult {
-  readonly state: DesignChangeLifecycleState;
-}
-
-/**
- * Adapter boundary for the lifecycle machine.  The runtime machine owns the
- * legal transition table; this module owns persistence/replay only.
- *
- * `transition` accepts the request object.  The implementation also accepts a
- * three-argument function at runtime so a small adapter can bridge an existing
- * machine without introducing a second transition authority.
- */
-export interface MachinePort {
-  readonly transition:
-    | ((request: MachineTransitionRequest) => MachineTransitionResult | DesignChangeLifecycleState)
-    | ((
-        state: DesignChangeLifecycleState,
-        event: DesignChangeEvent,
-        context: MachineTransitionContext,
-      ) => MachineTransitionResult | DesignChangeLifecycleState);
-}
 
 export interface LifecycleEvidencePort {
   readonly review?: (reference: string) => DesignReviewEvidence | undefined;

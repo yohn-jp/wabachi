@@ -5,6 +5,7 @@ import type {
   ImplementationLink,
   RepositoryRevisionReference,
 } from "../contracts.js";
+import type { GitPort } from "../ports.js";
 import type { Digest } from "../digest.js";
 import type { SemanticEntryKey } from "../entry-key.js";
 
@@ -16,11 +17,6 @@ export interface ImplementationCompletionEvidence {
   readonly implementation: ExternalIssueReference;
   readonly implementationRevision: RepositoryRevisionReference;
   readonly result: CertificationFinding;
-}
-
-/** The small Git capability needed to prove that a leaf revision is in an integration revision. */
-export interface GitPort {
-  isAncestor(ancestor: RepositoryRevisionReference, descendant: RepositoryRevisionReference): Promise<boolean>;
 }
 
 export type CoverageFindingKind =
