@@ -23,6 +23,23 @@ function baseCanon(): ArchitectureDocumentV1 {
   });
 }
 
+function codeIntent(id: string, text: string) {
+  return {
+    id,
+    ownerId: "architecture",
+    invariants: [{ id: `${id}-invariant`, text }],
+  };
+}
+
+function codeIntentCanon(entries: readonly ReturnType<typeof codeIntent>[]): ArchitectureDocumentV1 {
+  return createArchitectureDocument({
+    documentId: "code-intent-change-test",
+    root: { id: "architecture" },
+    repositoryMappings: entries.map(({ id }) => ({ canonId: id, paths: [`src/${id}.ts`] })),
+    codeIntents: { schemaVersion: 1, entries },
+  });
+}
+
 function json(value: unknown): JsonValue {
   return value as JsonValue;
 }
@@ -145,6 +162,53 @@ test("mutually referencing newly added entries succeed after one complete valida
 
   const result = applyDesignChange(changeFor(base, operations, target), base);
   assert.deepEqual(result, target);
+});
+
+test("production diff and apply round-trip added, modified, and removed Code Intent entries", () => {
+  const base = codeIntentCanon([codeIntent("intent-keep", "the old rule"), codeIntent("intent-remove", "remove")]);
+  const target = codeIntentCanon([codeIntent("intent-keep", "the amended rule"), codeIntent("intent-add", "add")]);
+  const operations = diffArchitectureDocuments(base, target);
+
+  assert.deepEqual(applyDesignChange(changeFor(base, operations, target), base), target);
+  assert.ok(operations.some((operation) => operation.entryKey === '["code-intent","intent-add"]'));
+  assert.ok(operations.some((operation) => operation.entryKey === '["code-intent","intent-keep"]'));
+  assert.ok(operations.some((operation) => operation.entryKey === '["code-intent","intent-remove"]'));
+});
+
+test("Code Intent identity and malformed operations fail closed", () => {
+  const base = codeIntentCanon([codeIntent("intent", "durable")]);
+  const intentKey = createSemanticEntryKey({ collection: "code-intent", identity: ["intent"] });
+  const target = codeIntentCanon([codeIntent("intent", "changed")]);
+  const current = base.codeIntents!.entries[0];
+
+  assert.throws(
+    () => applyDesignChange(changeFor(base, [modify(intentKey, current, { ...current, id: "renamed" })], target), base),
+    /changes the identity/,
+  );
+  assert.throws(
+    () =>
+      applyDesignChange(
+        changeFor(
+          base,
+          [add(createSemanticEntryKey({ collection: "code-intent", identity: ["new"] }), { id: "new" })],
+          target,
+        ),
+        base,
+      ),
+    /code intent ownerId must be a string|proposed Canon is invalid/,
+  );
+});
+
+test("removing the last Code Intent preserves an absent optional section", () => {
+  const base = codeIntentCanon([codeIntent("intent", "remove")]);
+  const target = createArchitectureDocument({
+    documentId: "code-intent-change-test",
+    root: { id: "architecture" },
+  });
+  const operations = diffArchitectureDocuments(base, target);
+
+  assert.deepEqual(applyDesignChange(changeFor(base, operations, target), base), target);
+  assert.equal(applyDesignChange(changeFor(base, operations, target), base).codeIntents, undefined);
 });
 
 test("production diff and apply round-trip every required semantic identity", () => {
