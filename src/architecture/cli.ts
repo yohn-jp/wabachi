@@ -5,25 +5,19 @@ import type { ArchitectureDocumentV1 } from "./canon/document.js";
 import { projectArchitectureDocument } from "./documentation/project.js";
 import { ArchitectureSiteError, buildArchitectureSite } from "./documentation/site.js";
 import { projectArchitectureDocumentToReactFlow } from "./projection/react-flow.js";
-import { commandUsage, DEFAULT_ARCHITECTURE_CANON_PATH } from "../command-contract.js";
 import { assertNoPendingTransactions } from "../design/storage/transaction.js";
 import { resolveRepositoryRoot } from "../design/storage/paths.js";
+import {
+  commandOutput,
+  jsonMachine,
+  textMachine,
+  wabachiDomainError,
+  type WabachiCommandResult,
+  type WabachiDomainError,
+} from "../cli/result.js";
 
 const MAX_DIAGNOSTIC_LENGTH = 240;
-
-type ArchitectureCommand = "example" | "validate" | "render";
-
-interface ArchitectureArgs {
-  readonly command: ArchitectureCommand;
-  readonly file?: string;
-  readonly outputRoot?: string;
-  readonly json: boolean;
-}
-
-interface ArchitectureDiagnostic {
-  readonly code: string;
-  readonly message: string;
-}
+const DEFAULT_ARCHITECTURE_CANON_PATH = ".wabachi/architecture.json";
 
 interface ArchitectureCanonCounts {
   readonly elements: number;
@@ -31,12 +25,6 @@ interface ArchitectureCanonCounts {
   readonly relationships: number;
   readonly flows: number;
   readonly views: number;
-}
-
-function usage(command?: ArchitectureCommand): string {
-  if (command === "validate") return commandUsage("architecture.validate");
-  if (command === "render") return commandUsage("architecture.render");
-  return commandUsage("architecture.help");
 }
 
 function bounded(value: string): string {
@@ -80,145 +68,79 @@ async function guardManagedCanonRead(file: string): Promise<void> {
   }
 }
 
-function parseArguments(
-  args: readonly string[],
-):
-  | { readonly ok: true; readonly value: ArchitectureArgs }
-  | { readonly ok: false; readonly json: boolean; readonly message: string } {
-  const command = args[0];
-  const json = args.includes("--json");
-  if (command !== "example" && command !== "validate" && command !== "render") {
-    return { ok: false, json, message: usage() };
-  }
-
-  let file: string | undefined;
-  let outputRoot: string | undefined;
-
-  for (let index = 1; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--json") continue;
-
-    if (argument === "--out") {
-      const value = args[index + 1];
-      if (value === undefined || value.startsWith("--")) {
-        return { ok: false, json, message: "--out requires a directory" };
-      }
-      if (outputRoot !== undefined) return { ok: false, json, message: "--out may be provided only once" };
-      outputRoot = value;
-      index += 1;
-      continue;
-    }
-
-    if (argument.startsWith("--")) return { ok: false, json, message: `unknown option: ${argument}` };
-    if (file !== undefined) return { ok: false, json, message: "architecture commands accept one explicit file" };
-    file = argument;
-  }
-
-  if (command === "example" && file !== undefined) {
-    return { ok: false, json, message: "architecture example does not accept a file" };
-  }
-  if (command === "validate" && outputRoot !== undefined) {
-    return { ok: false, json, message: "validate does not accept render options" };
-  }
-  if (command === "render" && outputRoot === undefined) {
-    return { ok: false, json, message: "render requires --out <dir>" };
-  }
-
-  return { ok: true, value: { command, file, outputRoot, json } };
+function architectureFailure(
+  command: "example" | "validate" | "render",
+  code: string,
+  message: string,
+): WabachiDomainError {
+  const diagnostic = { code, message: bounded(message) };
+  return wabachiDomainError(
+    `architecture ${command}: ${diagnostic.message}\n`,
+    jsonMachine({ ok: false, command: `architecture ${command}`, diagnostics: [diagnostic] }),
+  );
 }
 
-function writeFailure(command: ArchitectureCommand, json: boolean, diagnostic: ArchitectureDiagnostic): number {
-  const result = {
-    ok: false,
-    command: `architecture ${command}`,
-    diagnostics: [{ code: bounded(diagnostic.code), message: bounded(diagnostic.message) }],
-  };
-  if (json) {
-    console.log(JSON.stringify(result));
-  } else {
-    console.error(`${result.command}: ${result.diagnostics[0]?.message ?? "command failed"}`);
-  }
-  return 1;
-}
-
-function writeUsageFailure(json: boolean, message: string): number {
-  const diagnostic = { code: "invalid-arguments", message: bounded(message) };
-  if (json) {
-    console.log(JSON.stringify({ ok: false, command: "architecture", diagnostics: [diagnostic] }));
-  } else {
-    console.error(diagnostic.message);
-  }
-  return 1;
-}
-
-/** Adapt the public architecture CLI to the existing Canon and projection APIs. */
-export async function runArchitectureCli(args: readonly string[]): Promise<number> {
-  const parsed = parseArguments(args);
-  if (!parsed.ok) return writeUsageFailure(parsed.json, parsed.message);
-
-  const { command, json } = parsed.value;
-  if (command === "example") {
-    try {
-      const source = await readFile(new URL("../../docs/examples/minimal-canon.json", import.meta.url), "utf8");
-      parseCanonicalArchitectureDocument(source);
-      console.log(source.trim());
-      return 0;
-    } catch (error) {
-      return writeFailure(command, json, { code: "example-unavailable", message: errorMessage(error) });
-    }
-  }
-
-  const file = parsed.value.file ?? DEFAULT_ARCHITECTURE_CANON_PATH;
-  let document;
+export async function executeArchitectureExample(): Promise<WabachiCommandResult> {
   try {
-    await guardManagedCanonRead(file);
-    document = parseCanonicalArchitectureDocument(await readFile(file, "utf8"));
+    const source = await readFile(new URL("../../docs/examples/minimal-canon.json", import.meta.url), "utf8");
+    parseCanonicalArchitectureDocument(source);
+    const output = `${source.trim()}\n`;
+    return commandOutput(output, textMachine(output));
   } catch (error) {
-    if (isMissingFileError(error)) {
-      return writeFailure(command, json, {
-        code: "invalid-canon",
-        message: `architecture document not found: ${file}`,
-      });
-    }
-    return writeFailure(command, json, { code: "invalid-canon", message: errorMessage(error) });
+    throw architectureFailure("example", "example-unavailable", errorMessage(error));
+  }
+}
+
+export async function executeArchitectureValidate(file?: string): Promise<WabachiCommandResult> {
+  const input = file ?? DEFAULT_ARCHITECTURE_CANON_PATH;
+  let document: ArchitectureDocumentV1;
+  try {
+    await guardManagedCanonRead(input);
+    document = parseCanonicalArchitectureDocument(await readFile(input, "utf8"));
+  } catch (error) {
+    const message = isMissingFileError(error) ? `architecture document not found: ${input}` : errorMessage(error);
+    throw architectureFailure("validate", "invalid-canon", message);
   }
 
-  if (command === "validate") {
-    const counts = architectureCanonCounts(document);
-    if (json) {
-      console.log(JSON.stringify({ ok: true, command: "architecture validate", file, ...counts }));
-    } else {
-      console.log(`valid Architecture Canon: ${file}`);
-      console.log(architectureCanonSummary(counts));
-    }
-    return 0;
+  const counts = architectureCanonCounts(document);
+  const text = `valid Architecture Canon: ${input}\n${architectureCanonSummary(counts)}\n`;
+  return commandOutput(text, jsonMachine({ ok: true, command: "architecture validate", file: input, ...counts }));
+}
+
+export async function executeArchitectureRender(
+  file: string | undefined,
+  outputRoot: string,
+): Promise<WabachiCommandResult> {
+  const input = file ?? DEFAULT_ARCHITECTURE_CANON_PATH;
+  let document: ArchitectureDocumentV1;
+  try {
+    await guardManagedCanonRead(input);
+    document = parseCanonicalArchitectureDocument(await readFile(input, "utf8"));
+  } catch (error) {
+    const message = isMissingFileError(error) ? `architecture document not found: ${input}` : errorMessage(error);
+    throw architectureFailure("render", "invalid-canon", message);
   }
 
   try {
     const documentation = projectArchitectureDocument(document);
     const reactFlow = await projectArchitectureDocumentToReactFlow(document);
     const result = await buildArchitectureSite({
-      outputRoot: path.resolve(parsed.value.outputRoot as string),
+      outputRoot: path.resolve(outputRoot),
       documentation,
       reactFlow,
     });
-
-    if (json) {
-      console.log(
-        JSON.stringify({
-          ok: true,
-          command: "architecture render",
-          file,
-          outputRoot: result.outputRoot,
-          projectionLosses: result.losses.length,
-        }),
-      );
-    } else {
-      console.log(`rendered architecture site: ${result.outputRoot}`);
-    }
-    return 0;
+    return commandOutput(
+      `rendered architecture site: ${result.outputRoot}\n`,
+      jsonMachine({
+        ok: true,
+        command: "architecture render",
+        file: input,
+        outputRoot: result.outputRoot,
+        projectionLosses: result.losses.length,
+      }),
+    );
   } catch (error) {
     const code = error instanceof ArchitectureSiteError ? error.code : "render-failed";
-    return writeFailure(command, json, { code, message: errorMessage(error) });
+    throw architectureFailure("render", code, errorMessage(error));
   }
 }

@@ -1,25 +1,22 @@
-import {
-  commandExample,
-  commandHelpPointer,
-  commandInvocation,
-  getCommand,
-  type CommandId,
-} from "./command-contract.js";
+import { DEFAULT_SKILL_OUTPUT_BUDGET_BYTES, type CommandId } from "@yohn-jp/cli-canon";
+import { wabachiCommands, wabachiGroups } from "./cli/commands.js";
 
 /** Deterministic intent-oriented playbooks for the supported Wabachi surface. */
 
 export const SKILL_MODEL_VERSION = "1.0.0" as const;
-export const MAX_SKILL_OUTPUT_BYTES = 4096;
+export const MAX_SKILL_OUTPUT_BYTES = DEFAULT_SKILL_OUTPUT_BUDGET_BYTES;
+
+type SkillCommandId = CommandId<typeof wabachiCommands> | keyof typeof wabachiGroups;
 
 export interface SkillWorkflowStep {
   readonly summary: string;
-  /** Stable reference into the versioned command contract. */
-  readonly commandId: CommandId;
-  /** Bare executable command derived from commandId. */
+  /** Stable reference into the Canon-owned Wabachi command model. */
+  readonly commandId: SkillCommandId;
+  /** Bare executable command derived from its Canon-owned route. */
   readonly command: string;
-  /** Practical example derived from commandId. */
+  /** Practical example derived from the Canon command declaration. */
   readonly example: string;
-  /** Progressive-help pointer derived from commandId. */
+  /** Progressive-help pointer derived from the Canon-owned route. */
   readonly helpPointer: string;
 }
 
@@ -29,19 +26,31 @@ export interface SkillScenario {
   readonly whenToUse: string;
   readonly workflow: readonly SkillWorkflowStep[];
   readonly invariants: readonly string[];
-  readonly canonicalCommandId: CommandId;
+  readonly canonicalCommandId: SkillCommandId;
   readonly canonicalEntrypoint: string;
   readonly helpPointer: string;
 }
 
-function workflowStep(summary: string, commandId: CommandId): SkillWorkflowStep {
-  getCommand(commandId);
+function commandRoute(commandId: SkillCommandId): readonly string[] {
+  if (commandId in wabachiCommands) {
+    return wabachiCommands[commandId as keyof typeof wabachiCommands].route;
+  }
+  return wabachiGroups[commandId as keyof typeof wabachiGroups].route;
+}
+
+function commandInvocation(commandId: SkillCommandId): string {
+  return ["wabachi", ...commandRoute(commandId)].join(" ");
+}
+
+function workflowStep(summary: string, commandId: SkillCommandId): SkillWorkflowStep {
+  const command = commandId in wabachiCommands ? wabachiCommands[commandId as keyof typeof wabachiCommands] : undefined;
+  const invocation = commandInvocation(commandId);
   return {
     summary,
     commandId,
-    command: commandInvocation(commandId),
-    example: commandExample(commandId),
-    helpPointer: commandHelpPointer(commandId),
+    command: invocation,
+    example: command?.examples?.[0] ?? invocation,
+    helpPointer: `${invocation} --help`,
   };
 }
 
@@ -49,9 +58,9 @@ function skillScenario(input: {
   readonly id: string;
   readonly title: string;
   readonly whenToUse: string;
-  readonly workflow: readonly (readonly [summary: string, commandId: CommandId])[];
+  readonly workflow: readonly (readonly [summary: string, commandId: SkillCommandId])[];
   readonly invariants: readonly string[];
-  readonly canonicalCommandId: CommandId;
+  readonly canonicalCommandId: SkillCommandId;
 }): SkillScenario {
   return {
     id: input.id,
@@ -61,7 +70,7 @@ function skillScenario(input: {
     invariants: input.invariants,
     canonicalCommandId: input.canonicalCommandId,
     canonicalEntrypoint: commandInvocation(input.canonicalCommandId),
-    helpPointer: commandHelpPointer(input.canonicalCommandId),
+    helpPointer: `${commandInvocation(input.canonicalCommandId)} --help`,
   };
 }
 
@@ -141,7 +150,7 @@ export const SKILL_SCENARIOS: readonly SkillScenario[] = [
     workflow: [
       [
         "Author or revise the explicit Canon document using repository documentation guidance; no init command is implied.",
-        "architecture.help",
+        "architecture",
       ],
       ["Validate the authored Canon before producing derived documentation.", "architecture.validate"],
       ["Render the validated Canon into a retained static site.", "architecture.render"],
@@ -151,7 +160,7 @@ export const SKILL_SCENARIOS: readonly SkillScenario[] = [
       "Validation and rendering operate on an explicit Canon file and preserve existing execution semantics.",
       "Keep the generated site and source Canon together when the result is intended for review or publication.",
     ],
-    canonicalCommandId: "architecture.help",
+    canonicalCommandId: "architecture",
   }),
 ];
 
@@ -188,7 +197,7 @@ export function projectSkillIndexToText(): string {
     lines.push(`    ${scenario.whenToUse}`);
   }
   lines.push("", "Run `wabachi skill <scenario>` for one bounded playbook.");
-  return boundText(lines.join("\n"));
+  return lines.join("\n");
 }
 
 export function projectSkillScenarioToJson(scenario: SkillScenario): SkillScenarioProjection {
@@ -211,31 +220,5 @@ export function projectSkillScenarioToText(scenario: SkillScenario): string {
   lines.push("", "Invariants:");
   for (const invariant of projected.invariants) lines.push(`  - ${invariant}`);
   lines.push("", `Canonical entrypoint: ${projected.canonicalEntrypoint}`, `Exact syntax: ${projected.helpPointer}`);
-  return boundText(lines.join("\n"));
-}
-
-/** Keep text diagnostics and projections within the explicit UTF-8 budget. */
-export function boundText(value: string): string {
-  if (Buffer.byteLength(value, "utf8") <= MAX_SKILL_OUTPUT_BYTES) return value;
-  const suffix = "…";
-  const characters = Array.from(value);
-  while (
-    characters.length > 0 &&
-    Buffer.byteLength(`${characters.join("")}${suffix}`, "utf8") > MAX_SKILL_OUTPUT_BYTES
-  ) {
-    characters.pop();
-  }
-  return `${characters.join("")}${suffix}`;
-}
-
-/** Serialize a JSON projection without allowing the machine-readable path to exceed the same cap. */
-export function serializeSkillJson(value: unknown): string {
-  const serialized = JSON.stringify(value);
-  if (Buffer.byteLength(serialized, "utf8") <= MAX_SKILL_OUTPUT_BYTES) return serialized;
-  return JSON.stringify({
-    ok: false,
-    diagnostics: [
-      { code: "skill-output-too-large", message: `skill output exceeds ${MAX_SKILL_OUTPUT_BYTES} UTF-8 bytes` },
-    ],
-  });
+  return lines.join("\n");
 }

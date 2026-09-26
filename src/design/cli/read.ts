@@ -1,4 +1,4 @@
-import { canonicalizeJson, digestJson, type Digest } from "../digest.js";
+import { digestJson, type Digest } from "../digest.js";
 import type {
   CanonRevisionReference,
   CertificationEvidence,
@@ -10,7 +10,14 @@ import type {
 } from "../contracts.js";
 import { validateArchitectureDocument, type ArchitectureDiagnostic } from "../../architecture/canon/validate.js";
 import type { DesignIntentPorts } from "../ports.js";
-import type { DesignArguments, DesignReadCommand } from "./arguments.js";
+
+export type DesignReadCommand = "show" | "diff" | "status" | "validate";
+
+export interface DesignReadRequest {
+  readonly command: DesignReadCommand;
+  readonly changeId: string;
+  readonly section?: DesignChangeSection;
+}
 
 export type DesignReadPorts = Pick<DesignIntentPorts, "canon" | "changes" | "changeStore" | "lifecycle">;
 
@@ -379,16 +386,9 @@ async function validate(
 }
 
 /** Execute one read command using only the supplied read/domain ports. */
-export async function executeDesignRead(
-  command:
-    | DesignArguments
-    | { readonly command: DesignReadCommand; readonly changeId: string; readonly section?: DesignChangeSection },
-  ports: DesignReadPorts,
-): Promise<DesignReadResult> {
+export async function executeDesignRead(command: DesignReadRequest, ports: DesignReadPorts): Promise<DesignReadResult> {
   const commandName = command.command;
-  if (commandName === undefined) return failure("validate", "", "invalid-arguments", "Design read command is required");
   const changeId = command.changeId;
-  if (changeId === undefined) return failure(commandName, "", "invalid-arguments", "change-id is required");
 
   const loaded = await readChange(ports, commandName, changeId);
   if ("ok" in loaded && !loaded.ok) return loaded;
@@ -400,34 +400,16 @@ export async function executeDesignRead(
   return validate(ports, commandName, loaded);
 }
 
-/** Compatibility name for callers that treat the adapter as a command runner. */
-export const runDesignReadCommand = executeDesignRead;
-
 export class DesignReadService {
   constructor(private readonly ports: DesignReadPorts) {}
 
-  execute(
-    command:
-      | DesignArguments
-      | { readonly command: DesignReadCommand; readonly changeId: string; readonly section?: DesignChangeSection },
-  ): Promise<DesignReadResult> {
+  execute(command: DesignReadRequest): Promise<DesignReadResult> {
     return executeDesignRead(command, this.ports);
   }
 }
 
-export interface DesignReadExecution {
-  readonly exitCode: 0 | 1;
-  readonly result: DesignReadResult;
-  readonly output: string;
-}
-
-function jsonValue(result: DesignReadResult): string {
-  return canonicalizeJson(result);
-}
-
-/** Render the same result data for machine and human consumers. */
-export function renderDesignReadResult(result: DesignReadResult, json = false): string {
-  if (json) return jsonValue(result);
+/** Render the Design result for human presentation. CLI Canon serializes the typed result for machine output. */
+export function renderDesignReadResult(result: DesignReadResult): string {
   if (!result.ok) {
     const diagnostics = result.diagnostics.map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`).join("; ");
     return `design ${result.command} ${result.changeId}: ${diagnostics}`;
@@ -452,12 +434,4 @@ export function renderDesignReadResult(result: DesignReadResult, json = false): 
     lines.push(`valid: ${data.valid}`, `diagnostics: ${data.diagnostics.length}`);
   }
   return lines.join("\n");
-}
-
-export function serializeDesignReadResult(result: DesignReadResult): string {
-  return renderDesignReadResult(result, true);
-}
-
-export function designReadOutput(result: DesignReadResult, json: boolean): DesignReadExecution {
-  return { exitCode: result.exitCode, result, output: renderDesignReadResult(result, json) };
 }

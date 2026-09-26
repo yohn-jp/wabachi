@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { commandExample, commandHelpPointer, commandInvocation, getCommand } from "./command-contract.js";
+import { wabachiCommands, wabachiGroups } from "./cli/commands.js";
 import {
   MAX_SKILL_OUTPUT_BYTES,
   SKILL_SCENARIOS,
@@ -11,7 +11,7 @@ import {
   projectSkillScenarioToText,
 } from "./skill.js";
 
-test("skill scenarios are deterministic and cover the initial intents", () => {
+test("Wabachi playbooks preserve their content and use Canon command identities", () => {
   assert.deepEqual(
     SKILL_SCENARIOS.map((scenario) => scenario.id),
     [
@@ -30,20 +30,31 @@ test("skill scenarios are deterministic and cover the initial intents", () => {
   );
 });
 
-test("workflow command, examples, and help pointers derive from command IDs", () => {
+test("workflow routes, examples, and help pointers derive from Canon declarations", () => {
+  const routeById = new Map<string, readonly string[]>([
+    ...Object.entries(wabachiCommands).map(([id, command]) => [id, command.route] as const),
+    ...Object.entries(wabachiGroups).map(([id, group]) => [id, group.route] as const),
+  ]);
+  const invocation = (id: string) => {
+    const route = routeById.get(id);
+    assert.ok(route, `Skill references declared Canon route ${id}`);
+    return ["wabachi", ...route].join(" ");
+  };
+
   for (const scenario of SKILL_SCENARIOS) {
-    assert.equal(scenario.canonicalEntrypoint, commandInvocation(scenario.canonicalCommandId));
-    assert.equal(scenario.helpPointer, commandHelpPointer(scenario.canonicalCommandId));
+    assert.equal(scenario.canonicalEntrypoint, invocation(scenario.canonicalCommandId));
+    assert.equal(scenario.helpPointer, `${invocation(scenario.canonicalCommandId)} --help`);
     for (const step of scenario.workflow) {
-      getCommand(step.commandId);
-      assert.equal(step.command, commandInvocation(step.commandId));
-      assert.equal(step.example, commandExample(step.commandId));
-      assert.equal(step.helpPointer, commandHelpPointer(step.commandId));
+      const route = invocation(step.commandId);
+      const command = wabachiCommands[step.commandId as keyof typeof wabachiCommands];
+      assert.equal(step.command, route);
+      assert.equal(step.example, command?.examples?.[0] ?? route);
+      assert.equal(step.helpPointer, `${route} --help`);
     }
   }
 });
 
-test("text and JSON projections share scenario records and stay bounded", () => {
+test("Skill text and machine projections stay within Canon's output budget", () => {
   const indexText = projectSkillIndexToText();
   const indexJson = JSON.stringify(projectSkillIndexToJson());
   assert.ok(Buffer.byteLength(indexText, "utf8") <= MAX_SKILL_OUTPUT_BYTES);
