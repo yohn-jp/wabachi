@@ -1,177 +1,97 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { runCli } from "./cli.js";
-import { createArchitectureDocument } from "./architecture/canon/document.js";
-import { serializeCanonicalArchitectureDocument } from "./architecture/canon/codec.js";
+import { runWabachiCli } from "./cli.js";
 
-test("--help exits 0 and prints usage", async () => {
-  const originalLog = console.log;
-  const lines: string[] = [];
-  console.log = (line: string) => lines.push(line);
-  try {
-    const exitCode = await runCli(["--help"]);
-    assert.equal(exitCode, 0);
-    const output = lines.join("\n");
-    assert.match(output, /Usage: wabachi/);
-    assert.doesNotMatch(output, /PACKAGE_NAME/);
-  } finally {
-    console.log = originalLog;
-  }
-});
+test("CLI Canon owns root help, progressive route help, discovery, and version", async () => {
+  const root = await runWabachiCli(["--help"]);
+  assert.equal(root.exitCode, 0);
+  assert.match(root.stdout, /Usage: wabachi/u);
+  assert.match(root.stdout, /architecture\t/u);
+  assert.match(root.stdout, /design\t/u);
+  assert.equal(root.stderr, "");
 
-test("progressive help projects command and leaf options", async () => {
-  const originalLog = console.log;
-  const lines: string[] = [];
-  console.log = (line: string) => lines.push(line);
-  try {
-    assert.equal(await runCli(["architecture", "render", "--help"]), 0);
-    assert.match(lines[0] ?? "", /architecture render <file>/u);
-    assert.match(lines[0] ?? "", /React Flow \+ ELK/u);
-    assert.doesNotMatch(lines[0] ?? "", /--structurizr-command/u);
-
-    lines.length = 0;
-    assert.equal(await runCli(["architecture", "--help=json"]), 0);
-    const projection = JSON.parse(lines[0] ?? "{}");
-    assert.equal(projection.kind, "domain");
-    assert.deepEqual(
-      projection.commands.map((entry: { id: string }) => entry.id),
-      ["architecture.example", "architecture.validate", "architecture.render"],
-    );
-  } finally {
-    console.log = originalLog;
-  }
-});
-
-test("skill index, scenario, and unknown scenario are bounded and deterministic", async () => {
-  const originalLog = console.log;
-  const originalError = console.error;
-  const logs: string[] = [];
-  const errors: string[] = [];
-  console.log = (line: string) => logs.push(line);
-  console.error = (line: string) => errors.push(line);
-  try {
-    assert.equal(await runCli(["skill", "--json"]), 0);
-    assert.equal(JSON.parse(logs[0] ?? "{}").scenarios.length, 6);
-    logs.length = 0;
-    assert.equal(await runCli(["skill", "architecture-documentation", "--json"]), 0);
-    assert.equal(JSON.parse(logs[0] ?? "{}").id, "architecture-documentation");
-    assert.equal(await runCli(["skill", "not-a-scenario"]), 1);
-    assert.match(errors[0] ?? "", /unknown skill scenario/u);
-  } finally {
-    console.log = originalLog;
-    console.error = originalError;
-  }
-});
-
-test("--version reports package version", async () => {
-  const originalLog = console.log;
-  const lines: string[] = [];
-  console.log = (line: string) => lines.push(line);
-  try {
-    const exitCode = await runCli(["--version"]);
-    assert.equal(exitCode, 0);
-    assert.deepEqual(lines, ["0.4.0"]);
-  } finally {
-    console.log = originalLog;
-  }
-});
-
-test("no arguments exits 1", async () => {
-  const originalLog = console.log;
-  console.log = () => {};
-  try {
-    const exitCode = await runCli([]);
-    assert.equal(exitCode, 1);
-  } finally {
-    console.log = originalLog;
-  }
-});
-
-test("unknown command exits 1", async () => {
-  const originalLog = console.log;
-  const originalError = console.error;
-  console.log = () => {};
-  console.error = () => {};
-  try {
-    const exitCode = await runCli(["bogus"]);
-    assert.equal(exitCode, 1);
-  } finally {
-    console.log = originalLog;
-    console.error = originalError;
-  }
-});
-
-test("run without a repository argument exits 1", async () => {
-  const originalError = console.error;
-  console.error = () => {};
-  try {
-    const exitCode = await runCli(["run"]);
-    assert.equal(exitCode, 1);
-  } finally {
-    console.error = originalError;
-  }
-});
-
-test("run resolves the given repository and writes a manifest", async () => {
-  const originalLog = console.log;
-  const lines: string[] = [];
-  console.log = (line: string) => lines.push(line);
-
-  const runRoot = await mkdtemp(path.join(os.tmpdir(), "wabachi-cli-run-"));
-  try {
-    const exitCode = await runCli(["run", ".", "--out", runRoot]);
-    assert.equal(exitCode, 0);
-
-    const manifestPath = lines.at(-1);
-    assert.ok(manifestPath);
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    assert.match(manifest.repository.commitSha, /^[0-9a-f]{40}$/u);
-  } finally {
-    console.log = originalLog;
-    await rm(runRoot, { recursive: true, force: true });
-  }
-});
-
-test("run and matrix CLI failures preserve bounded process diagnostics", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "wabachi-cli-process-failure-"));
-  const runRoot = await mkdtemp(path.join(os.tmpdir(), "wabachi-cli-matrix-failure-"));
-  const originalError = console.error;
-  const errors: string[] = [];
-  console.error = (line: string) => errors.push(line);
-  try {
-    assert.equal(await runCli(["run", directory]), 1);
-    assert.match(errors.at(-1) ?? "", /git failed: git rev-parse HEAD \(exit 128\) stderr: fatal:/u);
-
-    assert.equal(await runCli(["matrix", directory, "--revision", "0".repeat(40), "--out", runRoot]), 1);
-    assert.match(errors.at(-1) ?? "", /git failed: git rev-parse 0{40} \(exit 128\) stderr: fatal:/u);
-  } finally {
-    console.error = originalError;
-    await rm(directory, { recursive: true, force: true });
-    await rm(runRoot, { recursive: true, force: true });
-  }
-});
-
-test("root CLI routes architecture validation", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "wabachi-cli-architecture-"));
-  const file = path.join(directory, "architecture.json");
-  await writeFile(
-    file,
-    serializeCanonicalArchitectureDocument(
-      createArchitectureDocument({ documentId: "architecture-document", root: { id: "architecture" } }),
-    ),
-    "utf8",
+  const help = await runWabachiCli(["architecture", "--help=json"]);
+  assert.equal(help.exitCode, 0);
+  const discovery = JSON.parse(help.stdout) as { name: string; commands: Array<{ id: string; route: string[] }> };
+  assert.equal(discovery.name, "wabachi");
+  assert.deepEqual(
+    discovery.commands.map(({ id }) => id),
+    ["architecture.example", "architecture.render", "architecture.validate"],
   );
-  const originalLog = console.log;
-  const lines: string[] = [];
-  console.log = (line: string) => lines.push(line);
+  assert.ok(discovery.commands.every(({ route }) => route[0] === "architecture"));
+
+  const version = await runWabachiCli(["--version"]);
+  assert.deepEqual(version, { exitCode: 0, stdout: "0.4.0\n", stderr: "" });
+});
+
+test("CLI Canon classifies malformed argv and missing required command inputs", async () => {
+  const unknownOption = await runWabachiCli(["architecture", "render", "canon.json", "--out", "site", "--bad"]);
+  assert.equal(unknownOption.failureKind, "usage");
+  assert.equal(unknownOption.exitCode, 2);
+  assert.match(unknownOption.stderr, /unknown option/u);
+
+  const missingRepository = await runWabachiCli(["run"]);
+  assert.equal(missingRepository.failureKind, "usage");
+  assert.equal(missingRepository.exitCode, 2);
+  assert.match(missingRepository.stderr, /repository/u);
+});
+
+test("Skill content is reached through the Canon route and keeps its domain size bound", async () => {
+  const index = await runWabachiCli(["skill"]);
+  assert.equal(index.exitCode, 0);
+  assert.match(index.stdout, /Wabachi skill scenarios/u);
+  assert.ok(Buffer.byteLength(index.stdout, "utf8") <= 4097);
+
+  const scenario = await runWabachiCli(["skill", "architecture-documentation", "--json"]);
+  assert.equal(scenario.exitCode, 0);
+  const projection = JSON.parse(scenario.stdout) as {
+    id: string;
+    title: string;
+    workflow: Array<{ commandId: string }>;
+  };
+  assert.equal(projection.id, "architecture-documentation");
+  assert.match(projection.title, /Architecture Documentation/u);
+  assert.deepEqual(
+    projection.workflow.map((step) => step.commandId),
+    ["architecture", "architecture.validate", "architecture.render"],
+  );
+
+  const missing = await runWabachiCli(["skill", "not-a-scenario"]);
+  assert.equal(missing.failureKind, "domain");
+  assert.equal(missing.exitCode, 1);
+  assert.match(missing.stderr, /unknown skill scenario/u);
+
+  const missingMachine = await runWabachiCli(["skill", "not-a-scenario", "--json"]);
+  assert.equal(missingMachine.failureKind, "domain");
+  assert.equal(missingMachine.exitCode, 1);
+  assert.equal(JSON.parse(missingMachine.stdout).diagnostics[0].code, "unknown-scenario");
+});
+
+test("run and matrix keep their analysis behavior behind typed Canon bindings", async () => {
+  const runRoot = await mkdtemp(path.join(os.tmpdir(), "wabachi-canon-run-"));
+  const matrixSource = await mkdtemp(path.join(os.tmpdir(), "wabachi-canon-matrix-source-"));
+  const matrixRoot = await mkdtemp(path.join(os.tmpdir(), "wabachi-canon-matrix-output-"));
   try {
-    assert.equal(await runCli(["architecture", "validate", file, "--json"]), 0);
-    assert.equal(JSON.parse(lines[0] ?? "{}").ok, true);
+    const run = await runWabachiCli(["run", ".", "--out", runRoot]);
+    assert.equal(run.exitCode, 0);
+    const manifestPath = run.stdout.trim();
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      repository: { commitSha: string };
+    };
+    assert.match(manifest.repository.commitSha, /^[0-9a-f]{40}$/u);
+
+    const matrix = await runWabachiCli(["matrix", matrixSource, "--revision", "0".repeat(40), "--out", matrixRoot]);
+    assert.equal(matrix.failureKind, "domain");
+    assert.equal(matrix.exitCode, 1);
+    assert.match(matrix.stderr, /git failed: git rev-parse/u);
   } finally {
-    console.log = originalLog;
-    await rm(directory, { recursive: true, force: true });
+    await Promise.all([
+      rm(runRoot, { recursive: true, force: true }),
+      rm(matrixSource, { recursive: true, force: true }),
+      rm(matrixRoot, { recursive: true, force: true }),
+    ]);
   }
 });

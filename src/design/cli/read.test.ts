@@ -5,7 +5,7 @@ import { digestJson, type Digest } from "../digest.js";
 import type { DesignChangeSet, DesignIntentLifecycleRecord } from "../contracts.js";
 import { createSemanticEntryKey } from "../entry-key.js";
 import type { DesignReadPorts } from "./read.js";
-import { DesignReadService, executeDesignRead, renderDesignReadResult, serializeDesignReadResult } from "./read.js";
+import { DesignReadService, executeDesignRead, renderDesignReadResult } from "./read.js";
 
 const document = createArchitectureDocument({ documentId: "architecture-document", root: { id: "architecture" } });
 const revision = {
@@ -105,12 +105,10 @@ test("status projects lifecycle state and reports an uninitialized record", asyn
   }
 });
 
-test("validate emits the same result semantics for JSON and text", async () => {
+test("validate returns domain data for Canon-owned machine serialization and human presentation", async () => {
   const result = await executeDesignRead({ command: "validate", changeId: change.changeId }, ports());
   assert.equal(result.ok, true);
-  const json = JSON.parse(serializeDesignReadResult(result));
-  assert.equal(json.ok, true);
-  assert.equal(json.data.valid, true);
+  if (result.ok && "valid" in result.data) assert.equal(result.data.valid, true);
   assert.match(renderDesignReadResult(result), /valid: true/u);
 });
 

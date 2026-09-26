@@ -3,9 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
+import { runWabachiCli } from "../cli.js";
 import { createArchitectureDocument } from "./canon/document.js";
 import { parseCanonicalArchitectureDocument, serializeCanonicalArchitectureDocument } from "./canon/codec.js";
-import { runArchitectureCli } from "./cli.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -22,49 +22,24 @@ async function canonicalFile(directory: string): Promise<string> {
   return file;
 }
 
-function captureOutput(): { readonly logs: string[]; readonly errors: string[]; restore: () => void } {
-  const originalLog = console.log;
-  const originalError = console.error;
-  const logs: string[] = [];
-  const errors: string[] = [];
-  console.log = (...values: unknown[]) => logs.push(values.map(String).join(" "));
-  console.error = (...values: unknown[]) => errors.push(values.map(String).join(" "));
-  return {
-    logs,
-    errors,
-    restore: () => {
-      console.log = originalLog;
-      console.error = originalError;
-    },
-  };
-}
-
 after(async () => {
   await Promise.all(temporaryDirectories.map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-test("validate accepts an explicit Canon file and emits JSON diagnostics", async () => {
-  const directory = await temporaryDirectory();
-  const file = await canonicalFile(directory);
-  const output = captureOutput();
-  try {
-    assert.equal(await runArchitectureCli(["validate", file, "--json"]), 0);
-    assert.deepEqual(JSON.parse(output.logs[0] ?? "{}"), {
-      ok: true,
-      command: "architecture validate",
-      file,
-      elements: 0,
-      interfaces: 0,
-      relationships: 0,
-      flows: 0,
-      views: 0,
-    });
-  } finally {
-    output.restore();
-  }
+test("architecture example is parsed by the existing domain parser and remains the emitted asset", async () => {
+  const expected = `${(await readFile(new URL("../../docs/examples/minimal-canon.json", import.meta.url), "utf8")).trim()}\n`;
+  const result = await runWabachiCli(["architecture", "example"]);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, expected);
+  assert.equal(result.stderr, "");
+
+  const document = parseCanonicalArchitectureDocument(result.stdout);
+  assert.equal(document.documentId, "minimal-architecture-canon");
+  assert.equal(document.root.id, "architecture");
+  assert.deepEqual(document.elements, []);
 });
 
-test("validate preserves text confirmation and reports deterministic Canon counts", async () => {
+test("architecture validate keeps the document summary and projects structured JSON", async () => {
   const directory = await temporaryDirectory();
   const file = path.join(directory, "architecture.json");
   const document = createArchitectureDocument({
@@ -87,168 +62,87 @@ test("validate preserves text confirmation and reports deterministic Canon count
     ],
   });
   await writeFile(file, serializeCanonicalArchitectureDocument(document), "utf8");
-  const output = captureOutput();
-  try {
-    assert.equal(await runArchitectureCli(["validate", file]), 0);
-    assert.deepEqual(output.logs, [
-      `valid Architecture Canon: ${file}`,
-      "Architecture Canon summary: elements=2, interfaces=1, relationships=1, flows=1, views=1",
-    ]);
-  } finally {
-    output.restore();
-  }
+
+  const result = await runWabachiCli(["architecture", "validate", file, "--json"]);
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    ok: true,
+    command: "architecture validate",
+    file,
+    elements: 2,
+    interfaces: 1,
+    relationships: 1,
+    flows: 1,
+    views: 1,
+  });
+
+  const text = await runWabachiCli(["architecture", "validate", file]);
+  assert.equal(
+    text.stdout,
+    `valid Architecture Canon: ${file}\nArchitecture Canon summary: elements=2, interfaces=1, relationships=1, flows=1, views=1\n`,
+  );
 });
 
-test("validate and render resolve the conventional Canon when the file is omitted", async () => {
+test("architecture validates and renders the conventional Canon without changing the working directory contract", async () => {
   const directory = await temporaryDirectory();
-  const conventionalDirectory = path.join(directory, ".wabachi");
-  await mkdir(conventionalDirectory);
+  await mkdir(path.join(directory, ".wabachi"));
   await writeFile(
-    path.join(conventionalDirectory, "architecture.json"),
+    path.join(directory, ".wabachi", "architecture.json"),
     await readFile(await canonicalFile(directory), "utf8"),
     "utf8",
   );
   const outputRoot = path.join(directory, "site");
-  const output = captureOutput();
   const originalDirectory = process.cwd();
   process.chdir(directory);
   try {
-    assert.equal(await runArchitectureCli(["validate", "--json"]), 0);
-    assert.deepEqual(JSON.parse(output.logs[0] ?? "{}"), {
-      ok: true,
-      command: "architecture validate",
-      file: ".wabachi/architecture.json",
-      elements: 0,
-      interfaces: 0,
-      relationships: 0,
-      flows: 0,
-      views: 0,
-    });
-    assert.equal(await runArchitectureCli(["render", "--out", outputRoot, "--json"]), 0);
-    assert.deepEqual(JSON.parse(output.logs[1] ?? "{}"), {
+    const validate = await runWabachiCli(["architecture", "validate", "--json"]);
+    assert.equal(validate.exitCode, 0);
+    assert.equal(JSON.parse(validate.stdout).file, ".wabachi/architecture.json");
+
+    const render = await runWabachiCli(["architecture", "render", "--out", outputRoot, "--json"]);
+    assert.equal(render.exitCode, 0);
+    assert.deepEqual(JSON.parse(render.stdout), {
       ok: true,
       command: "architecture render",
       file: ".wabachi/architecture.json",
       outputRoot,
       projectionLosses: 0,
     });
-  } finally {
-    process.chdir(originalDirectory);
-    output.restore();
-  }
-});
-
-test("missing conventional Canon names the expected path", async () => {
-  const directory = await temporaryDirectory();
-  const output = captureOutput();
-  const originalDirectory = process.cwd();
-  process.chdir(directory);
-  try {
-    assert.equal(await runArchitectureCli(["validate", "--json"]), 1);
-    const result = JSON.parse(output.logs[0] ?? "{}") as {
-      diagnostics?: Array<{ code?: string; message?: string }>;
-    };
-    assert.equal(result.diagnostics?.[0]?.code, "invalid-canon");
-    assert.match(result.diagnostics?.[0]?.message ?? "", /\.wabachi[\\/]architecture\.json/u);
-  } finally {
-    process.chdir(originalDirectory);
-    output.restore();
-  }
-});
-
-test("render reports a missing explicit Canon with a stable diagnostic", async () => {
-  const directory = await temporaryDirectory();
-  const file = path.join(directory, "missing-architecture.json");
-  const outputRoot = path.join(directory, "site");
-  const output = captureOutput();
-  try {
-    assert.equal(await runArchitectureCli(["render", file, "--out", outputRoot]), 1);
-    assert.equal(output.errors[0], `architecture render: architecture document not found: ${file}`);
-
-    assert.equal(await runArchitectureCli(["render", file, "--out", outputRoot, "--json"]), 1);
-    const result = JSON.parse(output.logs[0] ?? "{}") as {
-      diagnostics?: Array<{ code?: string; message?: string }>;
-    };
-    assert.equal(result.diagnostics?.[0]?.code, "invalid-canon");
-    assert.equal(result.diagnostics?.[0]?.message, `architecture document not found: ${file}`);
-    assert.doesNotMatch(result.diagnostics?.[0]?.message ?? "", /ENOENT/u);
-  } finally {
-    output.restore();
-  }
-});
-
-test("example prints a minimal Canon validated by the real codec without writing a file", async () => {
-  const output = captureOutput();
-  try {
-    assert.equal(await runArchitectureCli(["example"]), 0);
-    const document = parseCanonicalArchitectureDocument(output.logs[0] ?? "");
-    assert.equal(document.documentId, "minimal-architecture-canon");
-    assert.equal(document.root.id, "architecture");
-    assert.deepEqual(document.elements, []);
-  } finally {
-    output.restore();
-  }
-});
-
-test("invalid Canon returns a bounded non-zero JSON diagnostic", async () => {
-  const directory = await temporaryDirectory();
-  const file = path.join(directory, "invalid.json");
-  await writeFile(file, "x".repeat(10_000), "utf8");
-  const output = captureOutput();
-  try {
-    assert.equal(await runArchitectureCli(["validate", file, "--json"]), 1);
-    const result = JSON.parse(output.logs[0] ?? "{}") as {
-      diagnostics?: Array<{ code?: string; message?: string }>;
-    };
-    assert.equal(result.diagnostics?.[0]?.code, "invalid-canon");
-    assert.ok((result.diagnostics?.[0]?.message?.length ?? 0) <= 240);
-  } finally {
-    output.restore();
-  }
-});
-
-test("render uses the bundled React Flow + ELK renderer without an external executable", async () => {
-  const directory = await temporaryDirectory();
-  const file = await canonicalFile(directory);
-  const outputRoot = path.join(directory, "site");
-  const output = captureOutput();
-  try {
-    assert.equal(await runArchitectureCli(["render", file, "--out", outputRoot, "--json"]), 0);
-    const result = JSON.parse(output.logs[0] ?? "{}") as { ok?: boolean; outputRoot?: string };
-    assert.equal(result.ok, true);
-    assert.equal(result.outputRoot, outputRoot);
     assert.match(await readFile(path.join(outputRoot, "diagrams", "index.html"), "utf8"), /React Flow/u);
     assert.match(
       await readFile(path.join(outputRoot, "diagrams", "wabachi-react-flow.css"), "utf8"),
       /wabachi-react-flow/u,
     );
   } finally {
-    output.restore();
+    process.chdir(originalDirectory);
   }
 });
 
-test("the removed Structurizr override is rejected as an unknown option", async () => {
+test("architecture domain failures remain distinct from Canon usage failures", async () => {
   const directory = await temporaryDirectory();
-  const file = await canonicalFile(directory);
-  const output = captureOutput();
-  try {
-    assert.equal(
-      await runArchitectureCli([
-        "render",
-        file,
-        "--out",
-        path.join(directory, "missing-command-site"),
-        "--structurizr-command",
-        "structurizr",
-        "--json",
-      ]),
-      1,
-    );
-    const result = JSON.parse(output.logs[0] ?? "{}") as {
-      diagnostics?: Array<{ code?: string }>;
-    };
-    assert.equal(result.diagnostics?.[0]?.code, "invalid-arguments");
-  } finally {
-    output.restore();
-  }
+  const missing = path.join(directory, "missing-architecture.json");
+  const result = await runWabachiCli([
+    "architecture",
+    "render",
+    missing,
+    "--out",
+    path.join(directory, "site"),
+    "--json",
+  ]);
+  assert.equal(result.failureKind, "domain");
+  assert.equal(result.exitCode, 1);
+  const failure = JSON.parse(result.stdout) as { diagnostics?: Array<{ code?: string; message?: string }> };
+  assert.equal(failure.diagnostics?.[0]?.code, "invalid-canon");
+  assert.equal(failure.diagnostics?.[0]?.message, `architecture document not found: ${missing}`);
+  assert.doesNotMatch(failure.diagnostics?.[0]?.message ?? "", /ENOENT/u);
+
+  const invalid = path.join(directory, "invalid.json");
+  await writeFile(invalid, "x".repeat(10_000), "utf8");
+  const invalidResult = await runWabachiCli(["architecture", "validate", invalid, "--json"]);
+  assert.equal(invalidResult.failureKind, "domain");
+  const invalidFailure = JSON.parse(invalidResult.stdout) as {
+    diagnostics?: Array<{ code?: string; message?: string }>;
+  };
+  assert.equal(invalidFailure.diagnostics?.[0]?.code, "invalid-canon");
+  assert.ok((invalidFailure.diagnostics?.[0]?.message?.length ?? 0) <= 240);
 });

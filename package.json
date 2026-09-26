@@ -33,11 +33,13 @@
   "dependencies": {
     "@sourcegraph/scip-typescript": "0.4.0",
     "@xyflow/react": "12.11.6",
+    "@yohn-jp/cli-canon": "0.2.0",
     "elkjs": "0.12.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "typescript": "^6.0.3",
-    "xstate": "5.33.2"
+    "xstate": "5.33.2",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
