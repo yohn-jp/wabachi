@@ -4,6 +4,10 @@
 allowBuilds:
   esbuild: true
 
+# CLI Canon 0.2.0 is the required released baseline for Issue #310.
+minimumReleaseAgeExclude:
+  - "@yohn-jp/cli-canon@0.2.0"
+
 # Dependency pins that intentionally lag "latest" (see package.json):
 # - typescript: held at ^6.0.3. 7.x replaced the default export with a
 #   version-only stub (exports map "." -> lib/version.cjs) and moved the
