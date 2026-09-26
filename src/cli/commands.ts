@@ -34,7 +34,7 @@ const design = {
     summary: "Author and persist a Design Change draft from a target Canon.",
     examples: ["wabachi design create <change-id> <canon>"],
     input: {
-      ...designInput,
+      changeId: positional(changeId, { metavar: "change-id" }),
       canon: positional(z.string(), { required: false, metavar: "canon" }),
       input: option("--input", z.string(), { metavar: "path" }),
     },
@@ -73,7 +73,7 @@ const design = {
     summary: "Amend a Design Change from a target Canon.",
     examples: ["wabachi design amend <change-id> <canon>"],
     input: {
-      ...designInput,
+      changeId: positional(changeId, { metavar: "change-id" }),
       canon: positional(z.string(), { required: false, metavar: "canon" }),
       input: option("--input", z.string(), { metavar: "path" }),
     },

@@ -25,3 +25,11 @@ test("Design route and option errors are classified by CLI Canon", async () => {
   assert.equal(unsupportedOption.failureKind, "usage");
   assert.equal(unsupportedOption.exitCode, 2);
 });
+
+test("Design create and amend reject the unsupported --change-id option", async () => {
+  for (const command of ["create", "amend"] as const) {
+    const result = await runWabachiCli(["design", command, "--change-id", "foo", "canon.json"]);
+    assert.equal(result.failureKind, "usage");
+    assert.equal(result.exitCode, 2);
+  }
+});

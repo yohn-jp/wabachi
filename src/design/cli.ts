@@ -123,7 +123,7 @@ export async function executeDesignCommand(
     }
 
     if (command === "create" || command === "amend") {
-      const targetPath = input.input ?? (input.changeIdOption === undefined ? input.canon : input.changeId);
+      const targetPath = input.input ?? input.canon;
       if (targetPath === undefined) throw new Error("a target Canon path or --input <path> is required");
       const target = parseCanonicalArchitectureDocument(
         await readFile(path.resolve(runtime.repositoryRoot, targetPath), "utf8"),
